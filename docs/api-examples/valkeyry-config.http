@@ -61,3 +61,24 @@ Authorization: Bearer {{oidc_token}}
 GET http://localhost:8081/api/v1/tenants/acme-prod/audit?actor=build-bot
 X-API-Key: dev-key
 
+### Unicode / German characters round-trip (umlauts + ß)
+# Demonstrates that the engine accepts and preserves non-ASCII characters
+# (ä ö ü ß ÄÖÜ ẞ) verbatim through ingest → JSONB storage → search → audit.
+POST http://localhost:8081/api/v1/tenants/acme-prod/tables/customers/entries
+Content-Type: application/json; charset=UTF-8
+X-API-Key: dev-key
+
+{
+  "recordKey": "müller-jürgen",
+  "data": {
+    "id":          "müller-jürgen",
+    "tier":        "gold",
+    "displayName": "Jürgen Müller",
+    "greeting":    "Schöne Grüße aus Köln! Straße: Hauptstraße 42, Größe: ẞ"
+  }
+}
+
+### Read it back — the response body MUST contain the same UTF-8 bytes
+GET http://localhost:8081/api/v1/tenants/acme-prod/tables/customers/entries/müller-jürgen
+X-API-Key: dev-key
+

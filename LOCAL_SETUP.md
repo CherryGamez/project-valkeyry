@@ -65,6 +65,26 @@ docker compose --profile auth up -d keycloak
 # http://localhost:8081  admin / admin
 ```
 
+### Character encoding (UTF-8 / German umlauts)
+
+The compose stack uses the official `postgres:16` image, which initialises every database with `ENCODING 'UTF8'` by default — so `ä ö ü ß ÄÖÜ ẞ` round-trip end-to-end (JVM → WebFlux → R2DBC/JDBC → Postgres) with zero extra configuration.
+
+If you spin up Postgres **outside** the compose stack (bare-metal, Homebrew, RDS, etc.), create the databases explicitly as UTF-8:
+
+```bash
+createdb -E UTF8 -T template0 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8 ipaas
+createdb -E UTF8 -T template0 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8 valkeyry_config
+```
+
+Verify with `psql`:
+
+```bash
+psql -d ipaas -c "SHOW server_encoding;"   # should print: UTF8
+psql -d ipaas -c "SHOW client_encoding;"   # should print: UTF8
+```
+
+On macOS, ensure your shell locale is also UTF-8 (`echo $LANG` → `en_US.UTF-8` or any `*.UTF-8`). If you see mojibake (`Ã¤` instead of `ä`) when `curl`ing the API, run `export LANG=en_US.UTF-8` and retry.
+
 ---
 
 ## 3. Build and run the Spring backend

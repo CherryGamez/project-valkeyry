@@ -164,6 +164,47 @@ $env:AI_OLLAMA_MODEL = "qwen2.5:7b"
 mvn spring-boot:run
 ```
 
+### 3.1 Character encoding on Windows (UTF-8 / German umlauts)
+
+Windows is the only platform where the toolchain doesn't default to UTF-8, so a couple of one-time tweaks save a lot of pain when working with German text (`ä ö ü ß ÄÖÜ ẞ`).
+
+**PowerShell terminal** — switch the active code page to UTF-8 (CP 65001) so `curl`, `psql` and log output render umlauts correctly instead of `Ã¤`:
+
+```powershell
+chcp 65001                             # one-shot, current session only
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+[Console]::InputEncoding  = [Text.UTF8Encoding]::new()
+```
+
+To make it permanent, add the three lines above to your PowerShell profile (`notepad $PROFILE`). Avoid the legacy `cmd.exe` for Unicode work — it defaults to code page 1252 and will mangle non-ASCII characters even when the application emits perfectly valid UTF-8.
+
+**Java runtime** — JDK 18+ already defaults to UTF-8 for `file.encoding` (JEP 400), so no `-Dfile.encoding=UTF-8` flag is needed. Just make sure you're on JDK 21 (`java -version`).
+
+**Postgres on Windows** — the official `postgres:16` Docker image (used by `local-dev\docker-compose.yml`) creates UTF-8 databases automatically. If you installed Postgres natively via the EnterpriseDB installer instead, create the databases as UTF-8 from `psql`:
+
+```sql
+CREATE DATABASE ipaas
+  WITH ENCODING 'UTF8' TEMPLATE template0
+       LC_COLLATE = 'German_Germany.1252'  -- or 'C' if the locale is unavailable
+       LC_CTYPE   = 'German_Germany.1252';
+
+CREATE DATABASE valkeyry_config
+  WITH ENCODING 'UTF8' TEMPLATE template0
+       LC_COLLATE = 'German_Germany.1252'
+       LC_CTYPE   = 'German_Germany.1252';
+```
+
+> The Windows port of Postgres requires Windows-style locale names (`German_Germany.1252`), but the storage encoding stays UTF-8 — the locale only affects collation/sorting. Use `'C'` if you don't need locale-aware sorting.
+
+Verify:
+
+```powershell
+psql -h localhost -U ipaas -d ipaas -c "SHOW server_encoding;"     # → UTF8
+psql -h localhost -U ipaas -d ipaas -c "SHOW client_encoding;"     # → UTF8
+```
+
+**`curl` from PowerShell** — when sending JSON with umlauts inline, save the body to a UTF-8 file (no BOM) and reference it with `--data-binary "@body.json"`. Inline strings via `-d "..."` can be re-encoded by PowerShell's argument parser into Windows-1252 before they ever leave the shell.
+
 ---
 
 ## 4. Manual test playbook
