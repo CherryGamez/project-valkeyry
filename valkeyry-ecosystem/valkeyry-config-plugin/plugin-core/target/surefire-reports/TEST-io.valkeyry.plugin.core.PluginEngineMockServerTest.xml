@@ -60,7 +60,7 @@
   <testcase name="runDeclaresThenBatchIngestsAllEntries(Path)" classname="io.valkeyry.plugin.core.PluginEngineMockServerTest" time="0.549">
     <system-out><![CDATA[INFO Loaded manifest with 1 table(s) → http://localhost:39781
 INFO · customers: declaring schema…
-INFO   → registered id=00000000-0000-0000-0000-000000000001 configVersion=1
+INFO   → registered id=maven-struct-update configVersion=1
 INFO   → submitted=2 inserted=2 duplicates=0
 ]]></system-out>
   </testcase>
