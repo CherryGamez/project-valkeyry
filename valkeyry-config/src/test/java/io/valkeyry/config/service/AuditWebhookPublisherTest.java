@@ -54,6 +54,14 @@ class AuditWebhookPublisherTest {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
+        server.createContext("/ok2", exchange -> {
+            byte[] body = exchange.getRequestBody().readAllBytes();
+            received.add(new CapturedRequest("/ok2", new String(body, StandardCharsets.UTF_8),
+                    exchange.getRequestHeaders().getFirst("X-Valkeyry-Signature"),
+                    exchange.getRequestHeaders().getFirst("X-Valkeyry-Tenant")));
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
         server.createContext("/flaky", exchange -> {
             byte[] body = exchange.getRequestBody().readAllBytes();
             if (transientFailuresLeft.getAndDecrement() > 0) {
@@ -97,9 +105,11 @@ class AuditWebhookPublisherTest {
 
     @Test
     void fanOutToMultipleUrls() {
+        // Two DISTINCT URLs — the publisher dedupes by URL, so identical targets fire once,
+        // but distinct targets each receive their own delivery.
         AuditWebhookProperties props = props("s", List.of(
                 "http://localhost:" + port + "/ok",
-                "http://localhost:" + port + "/ok"));
+                "http://localhost:" + port + "/ok2"));
         AuditWebhookPublisher pub = new AuditWebhookPublisher(props, mapper);
         pub.publish(sampleEntry()).block(Duration.ofSeconds(5));
         await().atMost(Duration.ofSeconds(5)).until(() -> received.size() == 2);

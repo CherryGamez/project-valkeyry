@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -12,160 +12,329 @@
     <!-- Tailwind CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+      // ─── iPhone-inspired palette ────────────────────────────────────────
+      // Soft, airy, "Frosted Glass" energy. Apple HIG system colors as accents,
+      // grouped backgrounds for the canvas, vivid pastel gradients on hero surfaces.
       tailwind.config = {
-        darkMode: 'class',
         theme: {
           extend: {
             colors: {
-              ink:     { 50:'#F1F5F9', 100:'#CBD5E1', 200:'#94A3B8', 300:'#64748B' },
-              surface: { 900:'#0F172A', 800:'#1E293B', 700:'#334155', 950:'#0B1220' },
-              brand:   { DEFAULT:'#10B981', soft:'#064E3B', ink:'#6EE7B7' },
-              accent:  { rose:'#F43F5E', amber:'#F59E0B', blue:'#3B82F6', indigo:'#6366F1' }
+              // Apple HIG iOS 17 system colors (light appearance)
+              ios: {
+                blue:   '#007AFF',
+                indigo: '#5856D6',
+                purple: '#AF52DE',
+                pink:   '#FF2D55',
+                red:    '#FF3B30',
+                orange: '#FF9500',
+                yellow: '#FFCC00',
+                green:  '#34C759',
+                mint:   '#00C7BE',
+                teal:   '#30B0C7',
+                cyan:   '#32ADE6'
+              },
+              // Apple grouped-background / label hierarchy
+              canvas:  { DEFAULT:'#F2F2F7', deep:'#E5E5EA' },
+              card:    { DEFAULT:'#FFFFFF', sub:'#F9F9FB' },
+              ink:     { 950:'#000000', 900:'#1C1C1E', 700:'#3A3A3C', 500:'#8E8E93', 300:'#C7C7CC', 200:'#D1D1D6', 100:'#E5E5EA' },
+              hairline:{ DEFAULT:'rgba(60,60,67,0.12)', strong:'rgba(60,60,67,0.18)' }
             },
             fontFamily: {
-              sans: ['"Inter"','"SF Pro Display"','-apple-system','BlinkMacSystemFont','system-ui','sans-serif'],
-              mono: ['"JetBrains Mono"','"SF Mono"','ui-monospace','Menlo','monospace']
+              sans: ['-apple-system','BlinkMacSystemFont','"SF Pro Display"','"SF Pro Text"','"Inter"','system-ui','sans-serif'],
+              mono: ['"SF Mono"','ui-monospace','"JetBrains Mono"','Menlo','monospace']
             },
             boxShadow: {
-              card: '0 1px 2px rgba(2,6,23,0.40), 0 6px 18px rgba(2,6,23,0.30)',
-              lift: '0 8px 24px rgba(16,185,129,0.18)'
+              card:    '0 1px 2px rgba(16,24,40,0.04), 0 4px 16px rgba(16,24,40,0.04)',
+              cardHi:  '0 2px 4px rgba(16,24,40,0.05), 0 12px 32px rgba(16,24,40,0.07)',
+              floaty:  '0 8px 28px rgba(0,122,255,0.18)',
+              inset:   'inset 0 0 0 1px rgba(60,60,67,0.10)'
             },
-            borderRadius: { card:'14px' }
+            borderRadius: { card:'18px', xl2:'22px', pill:'999px' },
+            backdropBlur: { ios: '24px' }
           }
         }
       };
     </script>
 
     <style>
-      html, body { background:#0F172A; color:#F1F5F9; min-height:100%; font-family:"Inter","SF Pro Display",-apple-system,system-ui,sans-serif; letter-spacing:-0.011em; }
-      ::selection { background:#10B981; color:#0F172A; }
-      .scrollbar::-webkit-scrollbar { width:8px; height:8px; }
-      .scrollbar::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
-      .scrollbar::-webkit-scrollbar-thumb:hover { background:#475569; }
+      /* ─── Canvas ──────────────────────────────────────────────────────
+         A breezy multi-tone wash. Pastel orbs anchored top-left + top-right
+         on a near-white grouped background give the page a "Photos app" feel. */
+      html, body {
+        background:
+          radial-gradient(900px 600px at -10% -10%, rgba(0,122,255,0.10), transparent 60%),
+          radial-gradient(800px 500px at 110% -10%, rgba(255,45,85,0.07),  transparent 60%),
+          radial-gradient(700px 600px at 50% 110%, rgba(52,199,89,0.06),   transparent 60%),
+          #F2F2F7;
+        color: #1C1C1E;
+        min-height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", system-ui, sans-serif;
+        letter-spacing: -0.011em;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      ::selection { background: rgba(0,122,255,0.22); color:#1C1C1E; }
 
-      /* HTMX request indicators */
-      .htmx-request .spinner { opacity:1 !important; }
+      /* Custom scrollbar — minimalist, like macOS overlay */
+      .scrollbar::-webkit-scrollbar { width:6px; height:6px; }
+      .scrollbar::-webkit-scrollbar-thumb { background: rgba(60,60,67,0.22); border-radius:99px; }
+      .scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(60,60,67,0.36); }
+
+      /* HTMX request indicator */
       .htmx-indicator { opacity:0; transition: opacity 200ms ease; }
       .htmx-request .htmx-indicator { opacity:1; }
       .htmx-request.htmx-indicator { opacity:1; }
 
       /* Micro-interactions */
-      .lift { transition: transform 180ms cubic-bezier(.34,1.56,.64,1), box-shadow 180ms ease, border-color 180ms ease; }
-      .lift:hover { transform: translateY(-1px); border-color:#10B981; }
-      .press { transition: transform 120ms ease, background-color 120ms ease, opacity 120ms ease; }
-      .press:active { transform: scale(.97); }
+      .lift { transition: transform 200ms cubic-bezier(.2,.8,.2,1), box-shadow 200ms ease, background-color 160ms ease; }
+      .lift:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(16,24,40,0.05), 0 12px 32px rgba(16,24,40,0.07); }
+      .press { transition: transform 110ms ease, background-color 130ms ease, opacity 130ms ease, box-shadow 160ms ease; }
+      .press:active { transform: scale(.965); }
+
+      /* iOS-style primary button */
+      .btn-primary {
+        background: linear-gradient(180deg, #1E8BFF 0%, #007AFF 100%);
+        color: #FFFFFF;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 8px 20px rgba(0,122,255,0.32);
+        border-radius: 12px;
+        font-weight: 590;
+        letter-spacing: -0.011em;
+      }
+      .btn-primary:hover { background: linear-gradient(180deg, #3393FF 0%, #1E8BFF 100%); box-shadow: 0 1px 0 rgba(255,255,255,0.4) inset, 0 10px 24px rgba(0,122,255,0.38); }
+      .btn-secondary {
+        background: rgba(120,120,128,0.12);
+        color: #1C1C1E;
+        border-radius: 12px;
+        font-weight: 510;
+      }
+      .btn-secondary:hover { background: rgba(120,120,128,0.18); }
+      .btn-danger {
+        background: rgba(255,59,48,0.10);
+        color: #FF3B30;
+        border-radius: 12px;
+        font-weight: 510;
+      }
+      .btn-danger:hover { background: rgba(255,59,48,0.16); }
+      .btn-ghost {
+        background: transparent;
+        color: #007AFF;
+        border-radius: 12px;
+        font-weight: 510;
+      }
+      .btn-ghost:hover { background: rgba(0,122,255,0.08); }
 
       /* Sidebar item */
-      .nav-item.active { background:#10B981; color:#0F172A; }
-      .nav-item.active .nav-meta { color:#064E3B; }
+      .nav-item {
+        background: transparent;
+        color: #1C1C1E;
+        border-radius: 12px;
+        transition: background-color 140ms ease, transform 180ms cubic-bezier(.2,.8,.2,1);
+      }
+      .nav-item:hover { background: rgba(120,120,128,0.10); }
+      .nav-item.active {
+        background: linear-gradient(180deg, #1E8BFF 0%, #007AFF 100%);
+        color: #FFFFFF;
+        box-shadow: 0 6px 16px rgba(0,122,255,0.28);
+      }
+      .nav-item.active .nav-meta { color: rgba(255,255,255,0.78); }
 
-      /* Audit timeline rail */
-      .timeline { position:relative; padding-left:28px; }
-      .timeline::before { content:''; position:absolute; left:11px; top:0; bottom:0; width:2px; background:#334155; }
-      .timeline-dot { position:absolute; left:-22px; top:14px; width:14px; height:14px; border-radius:50%; border:3px solid #0F172A; box-shadow: 0 0 0 1px #334155; }
+      /* Vertical audit timeline rail */
+      .timeline { position:relative; padding-left:34px; }
+      .timeline::before {
+        content:''; position:absolute; left:14px; top:6px; bottom:6px; width:2px;
+        background: linear-gradient(180deg, rgba(0,122,255,0.45), rgba(0,122,255,0.10));
+        border-radius: 2px;
+      }
+      .timeline-dot {
+        position:absolute; left:-23px; top:18px; width:14px; height:14px; border-radius:50%;
+        background:#FFFFFF; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(60,60,67,0.18);
+      }
+      .timeline-dot.op-INGEST_RECORD { background:#34C759; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(52,199,89,.35); }
+      .timeline-dot.op-DECLARE_TABLE { background:#007AFF; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(0,122,255,.32); }
+      .timeline-dot.op-REVISE_TABLE  { background:#FF9500; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(255,149,0,.32); }
+      .timeline-dot.op-DEDUP_SKIP    { background:#8E8E93; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(142,142,147,.32); }
+      .timeline-dot.op-DELETE_RECORD { background:#FF3B30; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(255,59,48,.32); }
+      .timeline-dot.op-ROLLBACK      { background:#5856D6; box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 4px rgba(88,86,214,.32); }
 
-      /* Op badges */
-      .op-badge { padding:3px 9px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:.01em; white-space:nowrap; }
-      .op-DECLARE_TABLE { background:#1E3A8A; color:#93C5FD; }
-      .op-REVISE_TABLE  { background:#78350F; color:#FCD34D; }
-      .op-INGEST_RECORD { background:#064E3B; color:#6EE7B7; }
-      .op-DEDUP_SKIP    { background:#334155; color:#CBD5E1; }
-      .op-DELETE_RECORD { background:#7F1D1D; color:#FCA5A5; }
-      .op-ROLLBACK      { background:#312E81; color:#A5B4FC; }
+      /* Operation badges — soft pastel tints, iOS-style */
+      .op-badge { padding:3px 10px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:.005em; white-space:nowrap; display:inline-block; }
+      .op-DECLARE_TABLE { background: rgba(0,122,255,0.12);  color:#0062CC; }
+      .op-REVISE_TABLE  { background: rgba(255,149,0,0.14);  color:#B25D00; }
+      .op-INGEST_RECORD { background: rgba(52,199,89,0.14);  color:#1F7A33; }
+      .op-DEDUP_SKIP    { background: rgba(142,142,147,0.18); color:#3A3A3C; }
+      .op-DELETE_RECORD { background: rgba(255,59,48,0.12);  color:#C0271E; }
+      .op-ROLLBACK      { background: rgba(88,86,214,0.14);  color:#3D3BA8; }
 
-      /* JSON pretty box */
-      .json-box { background:#0B1220; border:1px solid #334155; border-radius:10px; padding:10px 12px; font-family:"JetBrains Mono","SF Mono",ui-monospace,Menlo,monospace; font-size:12px; line-height:1.55; color:#CBD5E1; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; }
+      /* JSON code box */
+      .json-box {
+        background: #F9F9FB;
+        border: 1px solid rgba(60,60,67,0.12);
+        border-radius: 14px;
+        padding: 12px 14px;
+        font-family: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+        font-size: 12px; line-height:1.6; color:#1C1C1E;
+        white-space: pre-wrap; word-break: break-word;
+        max-height: 300px; overflow:auto;
+      }
+
+      /* Inputs */
+      .ios-input {
+        background: #FFFFFF;
+        border: 1px solid rgba(60,60,67,0.14);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 14px;
+        color: #1C1C1E;
+        transition: border-color 140ms ease, box-shadow 140ms ease;
+      }
+      .ios-input::placeholder { color:#AEAEB2; }
+      .ios-input:focus { outline:none; border-color:#007AFF; box-shadow: 0 0 0 4px rgba(0,122,255,0.15); }
 
       /* Connection pulse */
       .pulse-dot { width:8px; height:8px; border-radius:50%; }
-      .pulse-online { background:#10B981; box-shadow: 0 0 0 0 rgba(16,185,129,.7); animation: pulse 2s infinite; }
-      @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(16,185,129,.45);} 70%{box-shadow:0 0 0 10px rgba(16,185,129,0);} 100%{box-shadow:0 0 0 0 rgba(16,185,129,0);} }
-      .pulse-off { background:#475569; }
+      .pulse-online { background:#34C759; box-shadow: 0 0 0 0 rgba(52,199,89,.7); animation: pulse 2.2s infinite; }
+      @keyframes pulse {
+        0%   { box-shadow: 0 0 0 0    rgba(52,199,89,.55); }
+        70%  { box-shadow: 0 0 0 10px rgba(52,199,89,0); }
+        100% { box-shadow: 0 0 0 0    rgba(52,199,89,0); }
+      }
+      .pulse-off { background:#C7C7CC; }
 
-      /* Toast */
-      #toast-stack { position:fixed; bottom:24px; right:24px; z-index:50; display:grid; gap:10px; }
-      .toast { background:#1E293B; border-left:3px solid #10B981; padding:12px 18px; border-radius:10px; box-shadow:0 8px 24px rgba(2,6,23,.5); min-width:280px; animation: slideIn 200ms ease; }
-      .toast.error { border-left-color:#F43F5E; }
-      @keyframes slideIn { from { transform: translateX(20px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+      /* Glass top bar */
+      .topbar-glass {
+        background: rgba(255,255,255,0.72);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+        backdrop-filter: saturate(180%) blur(20px);
+        border-bottom: 1px solid rgba(60,60,67,0.10);
+      }
 
       /* Tab nav */
-      .tab-btn { padding:10px 16px; font-size:14px; font-weight:500; color:#94A3B8; border-bottom:2px solid transparent; transition: color 120ms, border-color 120ms; }
-      .tab-btn.active { color:#10B981; border-bottom-color:#10B981; }
-      .tab-btn:hover:not(.active) { color:#CBD5E1; }
+      .tab-btn {
+        padding: 9px 14px; font-size: 14px; font-weight: 510;
+        color:#3A3A3C;
+        border-radius: 999px;
+        transition: background-color 140ms ease, color 140ms ease;
+      }
+      .tab-btn:hover:not(.active) { background: rgba(120,120,128,0.10); color:#1C1C1E; }
+      .tab-btn.active {
+        background: #1C1C1E; color:#FFFFFF;
+        box-shadow: 0 4px 12px rgba(28,28,30,0.22);
+      }
+
+      /* Cards */
+      .ios-card {
+        background:#FFFFFF;
+        border-radius: 18px;
+        box-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 4px 16px rgba(16,24,40,0.04);
+        border: 1px solid rgba(60,60,67,0.06);
+      }
+
+      /* Toast */
+      #toast-stack { position:fixed; bottom:24px; right:24px; z-index:60; display:grid; gap:10px; }
+      .toast {
+        background: rgba(255,255,255,0.92);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+        backdrop-filter: saturate(180%) blur(20px);
+        border:1px solid rgba(60,60,67,0.10);
+        border-left: 3px solid #34C759;
+        padding: 12px 18px; border-radius: 14px;
+        box-shadow: 0 10px 28px rgba(16,24,40,0.10);
+        min-width: 280px; color:#1C1C1E; font-size:13px;
+        animation: slideIn 220ms cubic-bezier(.2,.8,.2,1);
+      }
+      .toast.error { border-left-color:#FF3B30; }
+      @keyframes slideIn { from { transform: translateX(20px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+
+      /* Dialog backdrop */
+      dialog::backdrop {
+        background: rgba(28,28,30,0.32);
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+      }
+      dialog[open] { animation: modalIn 220ms cubic-bezier(.2,.8,.2,1); }
+      @keyframes modalIn { from { transform: translateY(10px) scale(.98); opacity:0; } to { transform: translateY(0) scale(1); opacity:1; } }
+
+      /* Section labels (iOS-style "Settings" small caps) */
+      .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #8E8E93;
+      }
     </style>
 </head>
 
 <body>
 
 <!-- ============================== TOP BAR ============================== -->
-<header class="border-b border-surface-700/70 bg-surface-900/95 backdrop-blur sticky top-0 z-20">
+<header class="topbar-glass sticky top-0 z-20">
     <div class="max-w-[1480px] mx-auto px-6 py-3.5 flex items-center gap-6">
         <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-card bg-gradient-to-br from-brand to-teal-500 flex items-center justify-center shadow-card">
-                <span class="text-surface-900 font-bold text-sm">V</span>
+            <div class="w-9 h-9 rounded-card flex items-center justify-center shadow-floaty"
+                 style="background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);">
+                <span class="text-white font-bold text-sm">V</span>
             </div>
             <div>
-                <div class="text-[15px] font-semibold tracking-tight">Valkeyry</div>
-                <div class="text-[11px] text-ink-300 -mt-0.5">Config Registry Admin</div>
+                <div class="text-[15px] font-semibold tracking-tight text-ink-900">Valkeyry</div>
+                <div class="text-[11px] text-ink-500 -mt-0.5">Config Registry Admin</div>
             </div>
         </div>
 
         <!-- Tenant + Auth control -->
-        <div data-testid="auth-bar" class="ml-auto flex items-center gap-3 bg-surface-800 px-3 py-2 rounded-card border border-surface-700">
-            <div class="flex items-center gap-2 text-[12px] text-ink-200">
+        <div data-testid="auth-bar" class="ml-auto flex items-center gap-3 bg-white/80 px-3 py-1.5 rounded-pill border border-hairline shadow-card">
+            <div class="flex items-center gap-2 text-[12px] text-ink-700">
                 <span id="conn-dot" class="pulse-dot pulse-off"></span>
                 <span id="conn-text" class="font-mono">disconnected</span>
             </div>
             <button id="open-auth-btn" data-testid="open-auth-btn"
                     onclick="document.getElementById('auth-modal').showModal()"
-                    class="press text-[13px] px-3 py-1.5 bg-brand text-surface-900 rounded-md font-semibold hover:bg-emerald-400">
+                    class="btn-primary press text-[13px] px-4 py-1.5">
                 Connect
             </button>
         </div>
     </div>
 
     <!-- Tab nav -->
-    <div class="max-w-[1480px] mx-auto px-6 flex items-center gap-1">
+    <div class="max-w-[1480px] mx-auto px-6 flex items-center gap-1.5 pb-3">
         <button class="tab-btn active" data-tab="tables" data-testid="tab-tables" onclick="switchTab('tables')">Virtual Tables</button>
         <button class="tab-btn" data-tab="audit"   data-testid="tab-audit"   onclick="switchTab('audit')">Audit Timeline</button>
         <button class="tab-btn" data-tab="webhooks" data-testid="tab-webhooks" onclick="switchTab('webhooks')">Webhooks</button>
-        <div class="ml-auto flex items-center gap-3 py-2 text-[11px] text-ink-300 font-mono">
+        <div class="ml-auto flex items-center gap-3 text-[11px] text-ink-500 font-mono">
             <span class="htmx-indicator inline-flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> syncing…
+                <span class="w-2 h-2 rounded-full bg-ios-orange animate-pulse"></span> syncing…
             </span>
         </div>
     </div>
 </header>
 
 <!-- ============================== AUTH MODAL ============================== -->
-<dialog id="auth-modal" class="bg-transparent text-ink-50 backdrop:bg-surface-900/80 backdrop:backdrop-blur-sm">
-    <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-6 w-[440px] shadow-card" data-testid="auth-modal">
-        <h2 class="text-[17px] font-semibold mb-1">Connect to a tenant</h2>
-        <p class="text-[12px] text-ink-300 mb-5">Credentials are stored in this browser only. Used in <span class="font-mono">X-API-Key</span> / <span class="font-mono">Authorization</span> headers.</p>
+<dialog id="auth-modal" class="bg-transparent text-ink-900">
+    <div class="ios-card p-7 w-[440px]" data-testid="auth-modal">
+        <h2 class="text-[20px] font-semibold mb-1 tracking-tight">Connect to a tenant</h2>
+        <p class="text-[13px] text-ink-500 mb-5">Credentials are stored in this browser only. Used in <span class="font-mono text-ink-700">X-API-Key</span> / <span class="font-mono text-ink-700">Authorization</span> headers.</p>
         <form id="auth-form" onsubmit="event.preventDefault(); saveConn();" class="grid gap-4">
             <label class="grid gap-1.5">
-                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Tenant ID</span>
-                <input id="auth-tenant" data-testid="auth-tenant-input" placeholder="demo-tenant" required
-                       class="bg-surface-950 rounded-md px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                <span class="section-label">Tenant ID</span>
+                <input id="auth-tenant" data-testid="auth-tenant-input" placeholder="demo-tenant" required class="ios-input"/>
             </label>
             <label class="grid gap-1.5">
-                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Auth mode</span>
-                <select id="auth-mode" data-testid="auth-mode-select"
-                        class="bg-surface-950 rounded-md px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40">
+                <span class="section-label">Auth mode</span>
+                <select id="auth-mode" data-testid="auth-mode-select" class="ios-input">
                     <option value="apikey">API Key (X-API-Key)</option>
                     <option value="bearer">OIDC Bearer (Authorization)</option>
                 </select>
             </label>
             <label class="grid gap-1.5">
-                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Token / Key</span>
+                <span class="section-label">Token / Key</span>
                 <input id="auth-token" data-testid="auth-token-input" type="password" placeholder="plugin-test-key"
-                       class="bg-surface-950 rounded-md px-3 py-2 font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                       class="ios-input font-mono text-[13px]"/>
             </label>
             <div class="flex items-center justify-end gap-2 mt-1">
                 <button type="button" onclick="document.getElementById('auth-modal').close()"
-                        class="press px-4 py-2 text-[13px] text-ink-200 hover:text-ink-50">Cancel</button>
+                        class="btn-ghost press px-4 py-2 text-[14px]">Cancel</button>
                 <button type="submit" data-testid="auth-save-btn"
-                        class="press px-4 py-2 text-[13px] bg-brand text-surface-900 rounded-md font-semibold hover:bg-emerald-400">Save &amp; Connect</button>
+                        class="btn-primary press px-4 py-2 text-[14px]">Save &amp; Connect</button>
             </div>
         </form>
     </div>
@@ -175,24 +344,24 @@
 <main class="max-w-[1480px] mx-auto px-6 py-6 grid grid-cols-[280px_1fr] gap-6">
 
     <!-- ===================== SIDEBAR (Tables nav) ===================== -->
-    <aside class="bg-surface-800/60 border border-surface-700 rounded-card-lg p-3 self-start sticky top-[112px]" data-testid="sidebar">
-        <div class="flex items-center justify-between px-2 pb-2.5 border-b border-surface-700">
-            <div class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Virtual Tables</div>
+    <aside class="ios-card p-3 self-start sticky top-[124px]" data-testid="sidebar">
+        <div class="flex items-center justify-between px-2 pb-2.5 border-b border-hairline">
+            <div class="section-label">Virtual Tables</div>
             <button id="refresh-sidebar-btn" data-testid="refresh-sidebar-btn"
                     onclick="refreshSidebar()"
                     title="Refresh tables"
-                    class="press text-ink-300 hover:text-brand text-sm">↻</button>
+                    class="press text-ink-500 hover:text-ios-blue text-sm w-6 h-6 rounded-full hover:bg-ink-100/60 flex items-center justify-center">↻</button>
         </div>
 
         <!-- The table list — re-fetched after every successful create/select via htmx.ajax() -->
         <div id="sidebar-list" data-testid="sidebar-list" class="pt-2.5 grid gap-1 max-h-[60vh] overflow-auto scrollbar"
              data-template="sidebar-tpl">
-            <div class="text-[12px] text-ink-300 italic px-2 py-3" data-testid="sidebar-empty">Connect to a tenant to load tables.</div>
+            <div class="text-[12px] text-ink-500 italic px-3 py-3" data-testid="sidebar-empty">Connect to a tenant to load tables.</div>
         </div>
 
         <button onclick="document.getElementById('create-table-modal').showModal()"
                 data-testid="open-create-table-btn"
-                class="press mt-3 w-full text-[13px] font-semibold px-3 py-2 bg-brand text-surface-900 rounded-md hover:bg-emerald-400 shadow-card disabled:opacity-50"
+                class="btn-primary press mt-3 w-full text-[13px] px-3 py-2.5 disabled:opacity-50"
                 id="create-table-trigger" disabled>
             + Declare new table
         </button>
@@ -205,65 +374,66 @@
         <div id="tab-tables" class="tab-pane" data-testid="tab-pane-tables">
             <div id="tables-content" data-testid="tables-content">
                 <!-- Default empty-state when no table selected -->
-                <div class="bg-surface-800/40 border border-dashed border-surface-700 rounded-card-lg p-10 text-center">
-                    <div class="w-12 h-12 mx-auto rounded-full bg-surface-800 flex items-center justify-center mb-3 text-2xl">⌗</div>
-                    <div class="text-[15px] font-medium">Pick a virtual table from the sidebar</div>
-                    <div class="text-[13px] text-ink-300 mt-1">Or <button class="text-brand underline" onclick="document.getElementById('create-table-modal').showModal()" id="empty-create-link">declare a new one</button> to get started.</div>
+                <div class="ios-card p-12 text-center" style="background: linear-gradient(180deg,#FFFFFF 0%,#F9F9FB 100%);">
+                    <div class="w-14 h-14 mx-auto rounded-card flex items-center justify-center mb-4 text-2xl text-white"
+                         style="background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%); box-shadow: 0 8px 20px rgba(0,122,255,0.28);">⌗</div>
+                    <div class="text-[18px] font-semibold tracking-tight">Pick a virtual table from the sidebar</div>
+                    <div class="text-[14px] text-ink-500 mt-1.5">Or <button class="text-ios-blue font-medium hover:underline" onclick="document.getElementById('create-table-modal').showModal()" id="empty-create-link">declare a new one</button> to get started.</div>
                 </div>
             </div>
         </div>
 
         <!-- ============== TAB: AUDIT ============== -->
         <div id="tab-audit" class="tab-pane hidden" data-testid="tab-pane-audit">
-            <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-5 mb-5">
+            <div class="ios-card p-6 mb-5">
                 <div class="flex items-center justify-between mb-3">
-                    <h2 class="text-[16px] font-semibold">Audit Timeline</h2>
+                    <h2 class="text-[18px] font-semibold tracking-tight">Audit Timeline</h2>
                     <button id="refresh-audit-btn" data-testid="refresh-audit-btn"
                             onclick="loadAudit()"
-                            class="press text-[13px] px-3 py-1.5 bg-surface-700 text-ink-50 rounded-md hover:bg-surface-700/70">
+                            class="btn-secondary press text-[13px] px-4 py-2">
                         ↻ Refresh
                     </button>
                 </div>
-                <p class="text-[12px] text-ink-300">Append-only ledger of every config change. Click <span class="op-badge op-ROLLBACK">Rollback</span> on any record-level entry to restore its prior state as a new version.</p>
+                <p class="text-[13px] text-ink-500">Append-only ledger of every config change. Click <span class="op-badge op-ROLLBACK">Rollback</span> on any record-level entry to restore its prior state as a new version.</p>
             </div>
             <div id="audit-content" data-testid="audit-content"
                  data-template="audit-tpl">
-                <div class="text-[13px] text-ink-300 italic px-2 py-3">Connect to a tenant and press Refresh to load audit history.</div>
+                <div class="text-[13px] text-ink-500 italic px-2 py-3">Connect to a tenant and press Refresh to load audit history.</div>
             </div>
         </div>
 
         <!-- ============== TAB: WEBHOOKS ============== -->
         <div id="tab-webhooks" class="tab-pane hidden" data-testid="tab-pane-webhooks">
-            <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-5 mb-5">
-                <h2 class="text-[16px] font-semibold mb-1">Audit Webhook Targets</h2>
-                <p class="text-[12px] text-ink-300 mb-4">Every persisted audit event is fanned-out to all enabled URLs with HMAC-SHA256 signature in <span class="font-mono">X-Valkeyry-Signature</span>. Per-row secrets override the global one.</p>
+            <div class="ios-card p-6 mb-5">
+                <h2 class="text-[18px] font-semibold tracking-tight mb-1">Audit Webhook Targets</h2>
+                <p class="text-[13px] text-ink-500 mb-5">Every persisted audit event is fanned-out to all enabled URLs with HMAC-SHA256 signature in <span class="font-mono text-ink-700">X-Valkeyry-Signature</span>. Per-row secrets override the global one.</p>
 
                 <form id="webhook-form" onsubmit="event.preventDefault(); createWebhook();"
                       class="grid grid-cols-[1fr_1fr_180px_auto] gap-3 items-end" data-testid="webhook-form">
                     <label class="grid gap-1.5">
-                        <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Webhook URL</span>
+                        <span class="section-label">Webhook URL</span>
                         <input id="wh-url" required placeholder="https://siem.example.com/valkeyry"
                                data-testid="webhook-url-input"
-                               class="bg-surface-950 rounded-md px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                               class="ios-input font-mono text-[13px]"/>
                     </label>
                     <label class="grid gap-1.5">
-                        <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Description</span>
+                        <span class="section-label">Description</span>
                         <input id="wh-desc" placeholder="Splunk prod" data-testid="webhook-desc-input"
-                               class="bg-surface-950 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                               class="ios-input text-[13px]"/>
                     </label>
                     <label class="grid gap-1.5">
-                        <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Override secret</span>
+                        <span class="section-label">Override secret</span>
                         <input id="wh-secret" type="password" placeholder="(optional)" data-testid="webhook-secret-input"
-                               class="bg-surface-950 rounded-md px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                               class="ios-input font-mono text-[13px]"/>
                     </label>
                     <button type="submit" data-testid="webhook-add-btn"
-                            class="press px-4 py-2 bg-brand text-surface-900 rounded-md font-semibold text-[13px] hover:bg-emerald-400">Add</button>
+                            class="btn-primary press px-5 py-2.5 text-[13px]">Add</button>
                 </form>
             </div>
 
             <div id="webhook-content" data-testid="webhook-content"
                  data-template="webhook-tpl">
-                <div class="text-[13px] text-ink-300 italic px-2 py-3">Connect to a tenant to load webhook subscriptions.</div>
+                <div class="text-[13px] text-ink-500 italic px-2 py-3">Connect to a tenant to load webhook subscriptions.</div>
             </div>
         </div>
 
@@ -271,21 +441,22 @@
 </main>
 
 <!-- ============================== CREATE TABLE MODAL ============================== -->
-<dialog id="create-table-modal" class="bg-transparent text-ink-50 backdrop:bg-surface-900/80 backdrop:backdrop-blur-sm">
-    <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-6 w-[640px] shadow-card" data-testid="create-table-modal">
-        <h2 class="text-[17px] font-semibold mb-1">Declare a virtual table</h2>
-        <p class="text-[12px] text-ink-300 mb-5">Provide a name and a Draft 2020-12 JSON Schema. The registry will validate every future entry against it.</p>
+<dialog id="create-table-modal" class="bg-transparent text-ink-900">
+    <div class="ios-card p-7 w-[640px]" data-testid="create-table-modal">
+        <h2 class="text-[20px] font-semibold mb-1 tracking-tight">Declare a virtual table</h2>
+        <p class="text-[13px] text-ink-500 mb-5">Provide a name and a Draft 2020-12 JSON Schema. The registry will validate every future entry against it.</p>
         <form id="create-table-form" onsubmit="event.preventDefault(); declareTable();" class="grid gap-4">
             <label class="grid gap-1.5">
-                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Table Name</span>
+                <span class="section-label">Table Name</span>
                 <input id="ct-name" required pattern="^[a-zA-Z0-9_\-]+$" data-testid="ct-name-input"
                        placeholder="customers"
-                       class="bg-surface-950 rounded-md px-3 py-2 text-[14px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                       class="ios-input font-mono text-[14px]"/>
             </label>
             <label class="grid gap-1.5">
-                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">JSON Schema</span>
+                <span class="section-label">JSON Schema</span>
                 <textarea id="ct-schema" rows="14" required data-testid="ct-schema-input"
-                          class="bg-surface-950 rounded-md px-3 py-2 text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40">{
+                          class="ios-input font-mono text-[12px]"
+                          style="background:#F9F9FB;">{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "required": ["email"],
@@ -300,9 +471,9 @@
             <div id="ct-error" data-testid="ct-error" class="hidden"></div>
             <div class="flex items-center justify-end gap-2 mt-1">
                 <button type="button" onclick="document.getElementById('create-table-modal').close()"
-                        class="press px-4 py-2 text-[13px] text-ink-200 hover:text-ink-50">Cancel</button>
+                        class="btn-ghost press px-4 py-2 text-[14px]">Cancel</button>
                 <button type="submit" data-testid="ct-submit-btn"
-                        class="press px-4 py-2 text-[13px] bg-brand text-surface-900 rounded-md font-semibold hover:bg-emerald-400">Declare</button>
+                        class="btn-primary press px-4 py-2 text-[14px]">Declare</button>
             </div>
         </form>
     </div>
@@ -318,14 +489,14 @@
 {{#hasRows}}
 {{#rows}}
 <button onclick="selectTable('{{tableName}}')" data-testid="sidebar-item-{{tableName}}"
-        class="nav-item lift text-left px-3 py-2 rounded-md border border-transparent hover:bg-surface-700/40 grid gap-0.5">
-    <span class="text-[13px] font-medium truncate">{{tableName}}</span>
-    <span class="nav-meta text-[11px] font-mono text-ink-300">v{{configVersion}}</span>
+        class="nav-item text-left px-3 py-2.5 grid gap-0.5">
+    <span class="text-[14px] font-medium truncate">{{tableName}}</span>
+    <span class="nav-meta text-[11px] font-mono text-ink-500">v{{configVersion}}</span>
 </button>
 {{/rows}}
 {{/hasRows}}
 {{^hasRows}}
-<div class="text-[12px] text-ink-300 italic px-2 py-3" data-testid="sidebar-empty-after">No tables yet. Declare one to begin.</div>
+<div class="text-[12px] text-ink-500 italic px-3 py-3" data-testid="sidebar-empty-after">No tables yet. Declare one to begin.</div>
 {{/hasRows}}
 </template>
 
@@ -334,25 +505,25 @@
 {{#hasRows}}
 <ul class="timeline grid gap-3" data-testid="audit-list">
 {{#rows}}
-<li class="bg-surface-800/60 border border-surface-700 rounded-card-lg p-4 lift" data-testid="audit-row-{{id}}">
+<li class="ios-card p-5 lift" data-testid="audit-row-{{id}}">
     <span class="timeline-dot op-{{operation}}"></span>
     <div class="flex items-center gap-3 flex-wrap mb-2">
         <span class="op-badge op-{{operation}}" data-testid="audit-op-{{id}}">{{operation}}</span>
-        <span class="text-[13px] font-medium">{{tableName}}{{#recordKey}} · <span class="text-brand">{{recordKey}}</span>{{/recordKey}}</span>
-        <span class="ml-auto text-[11px] text-ink-300 font-mono">{{changedAt}}</span>
+        <span class="text-[14px] font-medium text-ink-900">{{tableName}}{{#recordKey}} · <span class="text-ios-blue">{{recordKey}}</span>{{/recordKey}}</span>
+        <span class="ml-auto text-[11px] text-ink-500 font-mono">{{changedAt}}</span>
     </div>
-    <div class="text-[11px] text-ink-300 font-mono mb-2">
-        actor: <span class="text-ink-100">{{actor}}</span> · track: {{actorTrack}} · req: {{requestId}}
+    <div class="text-[11px] text-ink-500 font-mono mb-2">
+        actor: <span class="text-ink-900 font-semibold">{{actor}}</span> · track: {{actorTrack}} · req: {{requestId}}
     </div>
     <details class="mt-2">
-        <summary class="text-[12px] text-ink-200 cursor-pointer select-none">View before / after JSON</summary>
+        <summary class="text-[12px] text-ink-700 cursor-pointer select-none hover:text-ios-blue">View before / after JSON</summary>
         <div class="grid md:grid-cols-2 gap-3 mt-2">
             <div>
-                <div class="text-[10px] uppercase tracking-wider font-semibold text-accent-rose mb-1">Before</div>
+                <div class="text-[10px] uppercase tracking-wider font-semibold mb-1" style="color:#C0271E;">Before</div>
                 <pre class="json-box">{{beforeJson}}</pre>
             </div>
             <div>
-                <div class="text-[10px] uppercase tracking-wider font-semibold text-brand mb-1">After</div>
+                <div class="text-[10px] uppercase tracking-wider font-semibold mb-1" style="color:#1F7A33;">After</div>
                 <pre class="json-box">{{afterJson}}</pre>
             </div>
         </div>
@@ -360,7 +531,8 @@
     {{#canRollback}}
     <div class="mt-3 flex justify-end">
         <button onclick="rollbackAudit('{{id}}')" data-testid="rollback-btn-{{id}}"
-                class="press text-[12px] px-3 py-1.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/40 rounded-md hover:bg-indigo-500/20 font-semibold">
+                class="press text-[12px] px-4 py-2 rounded-pill font-semibold"
+                style="background: rgba(88,86,214,0.10); color:#3D3BA8; border:1px solid rgba(88,86,214,0.22);">
             ⤺ Push-button rollback
         </button>
     </div>
@@ -370,29 +542,29 @@
 </ul>
 {{/hasRows}}
 {{^hasRows}}
-<div class="text-[13px] text-ink-300 italic px-2 py-3" data-testid="audit-empty">No audit events yet for this tenant.</div>
+<div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="audit-empty">No audit events yet for this tenant.</div>
 {{/hasRows}}
 </template>
 
-<!-- Webhook list — root is an array -->
+<!-- Webhook list -->
 <template id="webhook-tpl">
 {{#hasRows}}
 <ul class="grid gap-2" data-testid="webhook-list">
 {{#rows}}
-<li class="bg-surface-800 border border-surface-700 rounded-card p-3 flex items-center gap-4" data-testid="webhook-row-{{id}}">
-    <div class="grid gap-0.5 min-w-0 flex-1">
+<li class="ios-card p-4 flex items-center gap-4 lift" data-testid="webhook-row-{{id}}">
+    <div class="grid gap-1 min-w-0 flex-1">
         <div class="flex items-center gap-2 flex-wrap">
-            <span class="font-mono text-[13px] truncate">{{url}}</span>
+            <span class="font-mono text-[13px] truncate text-ink-900">{{url}}</span>
             {{#enabled}}<span class="op-badge op-INGEST_RECORD">enabled</span>{{/enabled}}
             {{^enabled}}<span class="op-badge op-DEDUP_SKIP">disabled</span>{{/enabled}}
             {{#hasSecret}}<span class="op-badge op-REVISE_TABLE">override secret</span>{{/hasSecret}}
         </div>
-        <div class="text-[11px] text-ink-300 font-mono">
+        <div class="text-[11px] text-ink-500 font-mono">
             {{#description}}{{description}} · {{/description}}created {{createdAt}} by {{createdBy}}
         </div>
     </div>
     <button onclick="removeWebhook('{{id}}')" data-testid="webhook-remove-{{id}}"
-            class="press text-[12px] px-3 py-1.5 bg-accent-rose/10 text-accent-rose border border-accent-rose/40 rounded-md hover:bg-accent-rose/20 font-semibold">
+            class="btn-danger press text-[12px] px-4 py-2">
         Remove
     </button>
 </li>
@@ -400,30 +572,30 @@
 </ul>
 {{/hasRows}}
 {{^hasRows}}
-<div class="text-[13px] text-ink-300 italic px-2 py-3" data-testid="webhook-empty">No dynamic webhooks configured for this tenant.</div>
+<div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="webhook-empty">No dynamic webhooks configured for this tenant.</div>
 {{/hasRows}}
 </template>
 
-<!-- Entries grid template — root is an array -->
+<!-- Entries grid template -->
 <template id="entries-tpl">
 {{#hasRows}}
 <ul class="grid gap-2" data-testid="entries-list">
 {{#rows}}
-<li class="bg-surface-800 border border-surface-700 rounded-card p-3 grid gap-2" data-testid="entry-row-{{recordKey}}">
+<li class="ios-card p-4 grid gap-2 lift" data-testid="entry-row-{{recordKey}}">
     <div class="flex items-center gap-3 flex-wrap">
-        <span class="font-mono text-[13px] text-brand">{{recordKey}}</span>
+        <span class="font-mono text-[14px] text-ios-blue font-medium">{{recordKey}}</span>
         <span class="op-badge op-DEDUP_SKIP">v{{version}}</span>
-        <span class="text-[11px] text-ink-300 font-mono ml-auto">{{createdAt}} · {{createdBy}}</span>
+        <span class="text-[11px] text-ink-500 font-mono ml-auto">{{createdAt}} · {{createdBy}}</span>
     </div>
     <details>
-        <summary class="text-[12px] text-ink-200 cursor-pointer select-none">View JSON</summary>
+        <summary class="text-[12px] text-ink-700 cursor-pointer select-none hover:text-ios-blue">View JSON</summary>
         <pre class="json-box mt-2">{{dataJson}}</pre>
     </details>
     <div class="flex items-center gap-2 justify-end">
         <button onclick="editEntry('{{recordKey}}', this)" data-rk-data="{{dataJson}}" data-testid="entry-edit-{{recordKey}}"
-                class="press text-[12px] px-3 py-1.5 bg-surface-700 text-ink-50 rounded-md hover:bg-surface-700/70">Edit</button>
+                class="btn-secondary press text-[12px] px-4 py-2">Edit</button>
         <button onclick="deleteEntry('{{recordKey}}')" data-testid="entry-delete-{{recordKey}}"
-                class="press text-[12px] px-3 py-1.5 bg-accent-rose/10 text-accent-rose border border-accent-rose/40 rounded-md hover:bg-accent-rose/20 font-semibold">
+                class="btn-danger press text-[12px] px-4 py-2">
             Delete
         </button>
     </div>
@@ -432,7 +604,7 @@
 </ul>
 {{/hasRows}}
 {{^hasRows}}
-<div class="text-[13px] text-ink-300 italic px-2 py-3" data-testid="entries-empty">No entries yet. Use the form above to add one.</div>
+<div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="entries-empty">No entries yet. Use the form above to add one.</div>
 {{/hasRows}}
 </template>
 
@@ -670,14 +842,13 @@ async function declareTable() {
 function renderSchemaErrors(body) {
     const violations = body.violations || [];
     const html = `
-      <div class="bg-accent-rose/10 border border-accent-rose/40 rounded-card p-3" data-testid="schema-error">
-        <div class="text-[12px] uppercase tracking-wider font-semibold text-accent-rose mb-2">Schema validation failed</div>
-        <ul class="grid gap-1 text-[13px]">
-            ${violations.map(v => `<li><span class="font-mono text-accent-rose">${escapeHtml(v.path || '$')}</span> — ${escapeHtml(v.message || JSON.stringify(v))}</li>`).join('')}
+      <div class="rounded-card p-4" data-testid="schema-error"
+           style="background:rgba(255,59,48,0.06); border:1px solid rgba(255,59,48,0.22);">
+        <div class="text-[11px] uppercase tracking-wider font-semibold mb-2" style="color:#C0271E;">Schema validation failed</div>
+        <ul class="grid gap-1.5 text-[13px] text-ink-900">
+            ${violations.map(v => `<li><span class="font-mono" style="color:#C0271E;">${escapeHtml(v.path || '$')}</span> — ${escapeHtml(v.message || JSON.stringify(v))}</li>`).join('')}
         </ul>
       </div>`;
-    // Pick the inline-error slot that lives inside the currently-open dialog (if any),
-    // otherwise the entry-error slot (if visible on this tab).
     const openDialog = document.querySelector('dialog[open]');
     const slot = (openDialog && openDialog.querySelector('[data-testid$="-error"]')) ||
                   document.getElementById('entry-error');
@@ -686,8 +857,12 @@ function renderSchemaErrors(body) {
 }
 function renderValidationErrors(body) {
     const fields = body.fields || {};
-    const lines = Object.entries(fields).map(([f, msgs]) => `<li><span class="font-mono text-amber-300">${escapeHtml(f)}</span> — ${escapeHtml((msgs || []).join('; '))}</li>`);
-    const html = `<div class="bg-amber-500/10 border border-amber-500/40 rounded-card p-3" data-testid="request-error"><div class="text-[12px] uppercase tracking-wider font-semibold text-amber-300 mb-2">Request validation failed</div><ul class="grid gap-1 text-[13px]">${lines.join('')}</ul></div>`;
+    const lines = Object.entries(fields).map(([f, msgs]) => `<li><span class="font-mono" style="color:#B25D00;">${escapeHtml(f)}</span> — ${escapeHtml((msgs || []).join('; '))}</li>`);
+    const html = `<div class="rounded-card p-4" data-testid="request-error"
+                       style="background:rgba(255,149,0,0.08); border:1px solid rgba(255,149,0,0.26);">
+                    <div class="text-[11px] uppercase tracking-wider font-semibold mb-2" style="color:#B25D00;">Request validation failed</div>
+                    <ul class="grid gap-1.5 text-[13px] text-ink-900">${lines.join('')}</ul>
+                  </div>`;
     const slots = ['entry-error','ct-error'];
     const slot = slots.map(id => document.getElementById(id)).find(el => el);
     if (slot) { slot.innerHTML = html; slot.classList.remove('hidden'); }
@@ -697,7 +872,8 @@ function showInlineError(slotId, body) {
     const el = document.getElementById(slotId);
     if (!el) return;
     const msg = (body && (body.detail || body.title)) || 'Unknown error';
-    el.innerHTML = `<div class="bg-accent-rose/10 border border-accent-rose/40 rounded-card p-3 text-[13px] text-accent-rose" data-testid="${slotId}-message">${escapeHtml(msg)}</div>`;
+    el.innerHTML = `<div class="rounded-card p-4 text-[13px] font-medium" data-testid="${slotId}-message"
+                         style="background:rgba(255,59,48,0.06); border:1px solid rgba(255,59,48,0.22); color:#C0271E;">${escapeHtml(msg)}</div>`;
     el.classList.remove('hidden');
 }
 function escapeHtml(s) {
@@ -724,30 +900,30 @@ async function selectTable(name) {
     } catch {/* ignore */}
 
     const html = `
-      <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-5 mb-5">
+      <div class="ios-card p-6 mb-5">
         <div class="flex items-center justify-between mb-3">
           <div>
-            <h2 class="text-[16px] font-semibold" data-testid="selected-table-name">${escapeHtml(name)}</h2>
-            <p class="text-[11px] text-ink-300 font-mono">${schema ? 'JSON Schema attached' : 'no schema available'}</p>
+            <h2 class="text-[20px] font-semibold tracking-tight" data-testid="selected-table-name">${escapeHtml(name)}</h2>
+            <p class="text-[11px] text-ink-500 font-mono">${schema ? 'JSON Schema attached' : 'no schema available'}</p>
           </div>
           <button onclick="loadEntries('${escapeHtml(name)}')" data-testid="refresh-entries-btn"
-                  class="press text-[13px] px-3 py-1.5 bg-surface-700 text-ink-50 rounded-md hover:bg-surface-700/70">↻ Refresh</button>
+                  class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
         </div>
-        ${schema ? `<details class="mb-3"><summary class="text-[12px] text-ink-200 cursor-pointer">View JSON Schema</summary><pre class="json-box mt-2" data-testid="schema-display">${escapeHtml(JSON.stringify(schema, null, 2))}</pre></details>` : ''}
+        ${schema ? `<details class="mb-4"><summary class="text-[12px] text-ink-700 cursor-pointer hover:text-ios-blue">View JSON Schema</summary><pre class="json-box mt-2" data-testid="schema-display">${escapeHtml(JSON.stringify(schema, null, 2))}</pre></details>` : ''}
         <form id="entry-form" onsubmit="event.preventDefault(); ingestEntry('${escapeHtml(name)}')"
               class="grid grid-cols-[200px_1fr_auto] gap-3 items-start" data-testid="entry-form">
           <label class="grid gap-1.5">
-            <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Record key</span>
+            <span class="section-label">Record key</span>
             <input id="entry-key" required placeholder="alice@acme.io" data-testid="entry-key-input"
-                   class="bg-surface-950 rounded-md px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                   class="ios-input font-mono text-[13px]"/>
           </label>
           <label class="grid gap-1.5">
-            <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Data (JSON)</span>
+            <span class="section-label">Data (JSON)</span>
             <textarea id="entry-data" rows="6" required data-testid="entry-data-input"
-                      class="bg-surface-950 rounded-md px-3 py-2 text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40">${schema ? escapeHtml(sampleFromSchema(schema)) : '{}'}</textarea>
+                      class="ios-input font-mono text-[12px]" style="background:#F9F9FB;">${schema ? escapeHtml(sampleFromSchema(schema)) : '{}'}</textarea>
           </label>
           <button type="submit" data-testid="entry-submit-btn"
-                  class="press self-end px-4 py-2 bg-brand text-surface-900 rounded-md font-semibold text-[13px] hover:bg-emerald-400">
+                  class="btn-primary press self-end px-5 py-2.5 text-[13px]">
             Save entry
           </button>
         </form>
@@ -756,7 +932,7 @@ async function selectTable(name) {
 
       <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
            data-template="entries-tpl">
-        <div class="text-[13px] text-ink-300 italic px-2 py-3">Loading entries…</div>
+        <div class="text-[13px] text-ink-500 italic px-2 py-3">Loading entries…</div>
       </div>`;
     document.getElementById('tables-content').innerHTML = html;
     htmx.process(document.getElementById('tables-content'));

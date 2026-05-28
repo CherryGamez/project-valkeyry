@@ -48,7 +48,7 @@ Toolchain: JDK 21 (Temurin), Maven 3.8.7+, Docker for Testcontainers.
 **Frontend (single file, zero build):**
 - `valkeyry-config/src/main/resources/static/index.html` — complete HTMX shell.
 - Tailwind CDN + HTMX 1.9.10 + Mustache 4.2.0 (manual rendering via `htmx:beforeSwap`).
-- Slate + emerald palette, tactile/dense layout, micro-interactions, JSON pretty-printer.
+- **iPhone-inspired "light & breezy" theme** (2026-02-12 follow-up): Apple HIG iOS 17 system colors as accents (blue, indigo, mint, pink, orange), near-white canvas with pastel radial gradients, frosted-glass top bar (`backdrop-filter: blur`), pill-shaped buttons with iOS blue gradients, SF Pro Display font stack, soft shadows, color-coded timeline dots.
 - Auth bar — tenant + API-key or Bearer token, stored in `localStorage`, injected via `htmx:configRequest`.
 - All HTMX fetches done via `htmx.ajax()` (programmatic) for reliable URL handling.
 
@@ -84,16 +84,12 @@ Toolchain: JDK 21 (Temurin), Maven 3.8.7+, Docker for Testcontainers.
   in `htmx:beforeSwap`, parsed, and rendered as a list of `path — message` rows inside the
   closest open dialog's `data-testid$="-error"` slot. Form input is **never** lost.
 
-## Verification (manual, mocked-API end-to-end)
-A local `python3 -m http.server` served the static index.html. Playwright `page.route()` mocked the
-REST surface. Verified panels in sequence:
-- Sidebar populated, table click → entry CRUD grid (2 rows, JSON, Edit/Delete).
-- Audit timeline rendered 3 events, push-button rollback shown for INGEST/DELETE rows only.
-- Webhook panel showed 2 rows with enabled/disabled + override-secret badges, Add form.
-- Schema-violation path: returned 422 on create-table and on entry-ingest → inline error rendered, user input preserved.
-
-**Java build/tests not executed in this session** — no JDK/Maven available in the sandbox.
-The user can run `mvn -pl valkeyry-config -am verify` in their own dev env.
+## Verification
+- **Maven build**: `mvn -pl valkeyry-config -am -B -ntp clean compile` → SUCCESS (45 sources).
+- **Unit tests (2026-02-12)**: `mvn -pl valkeyry-config -am -Dtest='AuditWebhookPublisherTest,JsonSchemaValidatorServiceTest,PayloadFingerprintTest,VirtualTableControllerSliceTest' test` → **15/15 passing**.
+- **Updated test**: `AuditWebhookPublisherTest.fanOutToMultipleUrls` now uses two distinct URLs (`/ok` + `/ok2`) instead of duplicates, since the publisher now dedupes targets by URL — semantically more correct.
+- **Frontend (manual, mocked-API end-to-end)**: A local `python3 -m http.server` served the static index.html. Playwright `page.route()` mocked the REST surface. Verified every panel in the new iPhone-themed UI: sidebar populated, table click → entry CRUD grid, audit timeline with rollback button for record-level events only, webhook panel with add/list/remove + enabled/disabled/override-secret badges, schema-violation path returns 422 → inline error rendered, user input preserved.
+- **Testcontainers integration test** not executed in this sandbox (no Docker). User can run locally with `mvn -pl valkeyry-config verify`.
 
 ## Backlog
 - P1 — Optional: add `@SpringBootTest` integration tests for the new endpoints (`WebhookSubscriptionController`, `AuditRollbackController`, soft-delete) under `valkeyry-config/src/test/java/...`.
