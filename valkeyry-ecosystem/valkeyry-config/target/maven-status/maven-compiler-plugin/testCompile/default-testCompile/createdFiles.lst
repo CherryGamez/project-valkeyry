@@ -1,9 +1,0 @@
-io/valkeyry/config/ValkeyryConfigEcosystemIntegrationTest.class
-io/valkeyry/config/api/VirtualTableControllerSliceTest$MockBeans.class
-io/valkeyry/config/validation/PayloadFingerprintTest.class
-io/valkeyry/config/api/VirtualTableControllerSliceTest.class
-io/valkeyry/config/api/VirtualTableControllerSliceTest$TestApp.class
-io/valkeyry/config/service/AuditWebhookPublisherTest.class
-io/valkeyry/config/ValkeyryConfigEcosystemIntegrationTest$1.class
-io/valkeyry/config/service/AuditWebhookPublisherTest$CapturedRequest.class
-io/valkeyry/config/validation/JsonSchemaValidatorServiceTest.class

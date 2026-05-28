@@ -14,14 +14,14 @@ commands are nearly identical, just swap `pwsh` for `bash`.
 
 ```powershell
 # From the repo root, in PowerShell, after installing the prereqs (Section 1):
-cd local-dev
+cd valkeyry-ipaas\local-dev
 docker compose up -d
-cd ..
+cd ..\..
 $env:VAULT_TOKEN = "dev-root-token"
-.\local-dev\bootstrap-vault.ps1      # see appendix A if you don't have it yet
-mvn -DskipTests spring-boot:run      # backend on :8080
+.\valkeyry-ipaas\local-dev\bootstrap-vault.ps1      # see appendix A if you don't have it yet
+mvn -B -ntp -DskipTests -pl valkeyry-ipaas -am spring-boot:run      # backend on :8080
 # In a second terminal:
-cd frontend ; yarn install ; yarn start    # console on :3000
+cd valkeyry-ipaas\frontend ; yarn install ; yarn start    # console on :3000
 # Open http://localhost:3000 — log in, click around. Done.
 ```
 
@@ -235,7 +235,7 @@ curl -X POST http://localhost:8080/api/v1/acme-corp/payments-prod/dlq/orders/ret
 # Save a 1→N topology
 curl -X POST http://localhost:8080/api/v1/acme-corp/payments-prod/topologies `
   -H "Content-Type: application/json" `
-  --data-binary "@local-dev/sample-integration-manifest.yaml"
+  --data-binary "@valkeyry-ipaas/local-dev/sample-integration-manifest.yaml"
 
 # List
 curl http://localhost:8080/api/v1/acme-corp/payments-prod/topologies | jq
@@ -307,7 +307,7 @@ curl -X POST http://localhost:8080/api/v1/acme-corp/payments-prod/ingress/orders
 ```powershell
 $env:AI_ENGINE = "BRIDGE"
 $env:AI_BRIDGE_URL = "http://localhost:8090"
-# Make sure `local-dev/ai-bridge` is running (uvicorn on :8090).
+# Make sure `valkeyry-ipaas/local-dev/ai-bridge` is running (uvicorn on :8090).
 ```
 
 #### Per-message overrides
@@ -477,22 +477,22 @@ docker compose logs -f ollama
 |--------------------|---------------------------------------------------------------------|
 | Java backend       | `src/main/java/io/valkeyry/ipaas/**`                                |
 | Spring AI config   | `src/main/java/io/valkeyry/ipaas/config/SpringAiConfig.java`        |
-| AI interceptor     | `src/main/java/io/valkeyry/ipaas/interceptor/AiEnrichmentInterceptor.java` |
-| Copilot            | `src/main/java/io/valkeyry/ipaas/copilot/**`                        |
-| Kafka AdminClient  | `src/main/java/io/valkeyry/ipaas/broker/KafkaBrokerClient.java`     |
-| Metrics tags       | `src/main/java/io/valkeyry/ipaas/metrics/MetricsTagConfig.java`     |
-| Grafana dashboards | `local-dev/observability/grafana/provisioning/dashboards/`          |
-| Gatling tests      | `load-tests/`                                                       |
-| React console      | `frontend/src/`                                                     |
-| Copilot UI         | `frontend/src/components/admin/CopilotPanel.jsx`                    |
-| Docker compose     | `local-dev/docker-compose.yaml`                                     |
-| App config         | `src/main/resources/application.yml`                                |
+| AI interceptor     | `valkeyry-ipaas/src/main/java/io/valkeyry/ipaas/interceptor/AiEnrichmentInterceptor.java` |
+| Copilot            | `valkeyry-ipaas/src/main/java/io/valkeyry/ipaas/copilot/**`                        |
+| Kafka AdminClient  | `valkeyry-ipaas/src/main/java/io/valkeyry/ipaas/broker/KafkaBrokerClient.java`     |
+| Metrics tags       | `valkeyry-ipaas/src/main/java/io/valkeyry/ipaas/metrics/MetricsTagConfig.java`     |
+| Grafana dashboards | `valkeyry-ipaas/local-dev/observability/grafana/provisioning/dashboards/`          |
+| Gatling tests      | `valkeyry-ipaas/load-tests/`                                                       |
+| React console      | `valkeyry-ipaas/frontend/src/`                                                     |
+| Copilot UI         | `valkeyry-ipaas/frontend/src/components/admin/CopilotPanel.jsx`                    |
+| Docker compose     | `valkeyry-ipaas/local-dev/docker-compose.yaml`                                     |
+| App config         | `valkeyry-ipaas/src/main/resources/application.yml`                                |
 
 ---
 
 ## Appendix A — `bootstrap-vault.ps1`
 
-If you don't have it, save the following as `local-dev/bootstrap-vault.ps1`:
+If you don't have it, save the following as `valkeyry-ipaas/local-dev/bootstrap-vault.ps1`:
 
 ```powershell
 # Idempotent: seeds dev secrets so the platform boots without external creds.

@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: io.valkeyry.ipaas.interceptor.AiEnrichmentInterceptorTest
--------------------------------------------------------------------------------
-Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.218 s -- in io.valkeyry.ipaas.interceptor.AiEnrichmentInterceptorTest

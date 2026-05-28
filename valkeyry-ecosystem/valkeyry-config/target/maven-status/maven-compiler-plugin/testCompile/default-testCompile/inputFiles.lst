@@ -1,5 +1,0 @@
-/app/valkeyry-ecosystem/valkeyry-config/src/test/java/io/valkeyry/config/ValkeyryConfigEcosystemIntegrationTest.java
-/app/valkeyry-ecosystem/valkeyry-config/src/test/java/io/valkeyry/config/api/VirtualTableControllerSliceTest.java
-/app/valkeyry-ecosystem/valkeyry-config/src/test/java/io/valkeyry/config/service/AuditWebhookPublisherTest.java
-/app/valkeyry-ecosystem/valkeyry-config/src/test/java/io/valkeyry/config/validation/JsonSchemaValidatorServiceTest.java
-/app/valkeyry-ecosystem/valkeyry-config/src/test/java/io/valkeyry/config/validation/PayloadFingerprintTest.java

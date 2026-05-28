@@ -37,7 +37,7 @@ node -v && yarn -v
 ## 2. Boot the infrastructure stack
 
 ```bash
-cd /path/to/valkeyry/local-dev
+cd /path/to/valkeyry/valkeyry-ipaas/local-dev
 docker compose up -d
 ./bootstrap-vault.sh         # injects dummy S3 creds into Vault dev
 ```
@@ -70,9 +70,9 @@ docker compose --profile auth up -d keycloak
 ## 3. Build and run the Spring backend
 
 ```bash
-cd ..                       # back to the /app repo root
-mvn -DskipTests package
-ALLOW_ANONYMOUS=true java -jar target/ipaas-platform-1.0.0.jar
+cd ..                       # back to the repo root (where the reactor pom.xml lives)
+mvn -B -ntp -DskipTests -pl valkeyry-ipaas -am clean package
+ALLOW_ANONYMOUS=true java -jar valkeyry-ipaas/target/valkeyry-ipaas-1.0.0-SNAPSHOT.jar
 ```
 
 The `ALLOW_ANONYMOUS=true` env var disables OIDC + RBAC for local testing.
@@ -90,7 +90,7 @@ To enable AI enrichment in the consumer pipeline:
 
 ```bash
 AI_ENABLED=true AI_MODE=ENRICH AI_PROVIDER=openai AI_MODEL=gpt-4.1-mini \
-ALLOW_ANONYMOUS=true java -jar target/ipaas-platform-1.0.0.jar
+ALLOW_ANONYMOUS=true java -jar valkeyry-ipaas/target/valkeyry-ipaas-1.0.0-SNAPSHOT.jar
 ```
 
 ---
@@ -102,6 +102,9 @@ cd frontend
 yarn install
 yarn start             # http://localhost:3000
 ```
+
+> The frontend lives at `valkeyry-ipaas/frontend/`. If you came from the repo
+> root, use `cd valkeyry-ipaas/frontend` instead.
 
 On first visit you land on the **Sign in** page. Use:
 
@@ -248,7 +251,7 @@ mvn verify              # full Testcontainers integration test (needs Docker)
 ## 7. Tear down
 
 ```bash
-cd local-dev && docker compose down -v
+cd valkeyry-ipaas/local-dev && docker compose down -v
 # kill the Spring jar (Ctrl-C in its terminal)
 # kill the React dev server (Ctrl-C in its terminal)
 ```

@@ -78,9 +78,25 @@ agenthub/agents/youtube/db
 
 memory/test_credentials.md
 
+# Maven / Java build output
+target/
+**/target/
+*.jar
+*.war
+!**/src/main/**/*.jar
+!**/src/test/**/*.jar
+.mvn/wrapper/maven-wrapper.jar
+
+# Gradle build output
+.gradle/
+**/build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
 # Mobile development
-android-sdk/target/ipaas-platform-1.0.0.jar
-target/ipaas-platform-1.0.0.jar
+android-sdk/
+
+# Env / credentials
 .env
 .env.*
 *.env
