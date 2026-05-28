@@ -19,6 +19,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.junit.jupiter.api.condition.EnabledIf;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -57,9 +59,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @Testcontainers
+@EnabledIf("io.valkeyry.config.ValkeyryConfigEcosystemIntegrationTest#isDockerAvailable")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ValkeyryConfigEcosystemIntegrationTest {
+
+    /**
+     * Gate the entire test class on a working Docker daemon. Returning {@code false} causes
+     * JUnit to <em>skip</em> the class instead of failing it, which keeps {@code mvn verify}
+     * green on developer machines / CI workers that don't have Docker (e.g. sandboxes,
+     * lightweight self-hosted runners). Devs with Docker get the full integration coverage.
+     */
+    static boolean isDockerAvailable() {
+        try { return DockerClientFactory.instance().isDockerAvailable(); }
+        catch (Throwable ignored) { return false; }
+    }
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
