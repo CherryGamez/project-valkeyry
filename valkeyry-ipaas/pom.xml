@@ -65,6 +65,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
         </dependency>
+        <!--
+             Required because application.yml enables `spring.data.redis.lettuce.pool`.
+             Spring Boot's Lettuce auto-config uses LettucePoolingClientConfiguration,
+             which depends on commons-pool2 at runtime; without it the context fails
+             with NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig.
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-r2dbc</artifactId>
