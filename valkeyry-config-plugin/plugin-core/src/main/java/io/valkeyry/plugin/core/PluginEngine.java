@@ -15,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -90,10 +89,17 @@ public final class PluginEngine {
     private static List<Path> expandGlob(Path baseDir, String pattern) throws IOException {
         if (pattern == null || pattern.isBlank()) return List.of();
         Path absoluteBase = baseDir.toAbsolutePath();
-        // Pattern is *relative* to the base dir.
-        Path glob = Paths.get(pattern);
-        Path parent = glob.getParent() == null ? absoluteBase : absoluteBase.resolve(glob.getParent());
-        String filePattern = glob.getFileName().toString();
+        // Pattern is *relative* to the base dir and uses '/' as the separator (manifest is YAML,
+        // authored once and consumed on any OS). Do NOT build a Path from the raw pattern —
+        // '*' and '?' are illegal NTFS characters on Windows and Paths.get throws
+        // InvalidPathException before we ever reach the matcher (issue surfaces only on Windows
+        // because POSIX paths happen to accept '*'). Split the literal directory portion from
+        // the filename glob portion as plain strings instead.
+        String normalised = pattern.replace('\\', '/');
+        int lastSlash = normalised.lastIndexOf('/');
+        String dirPart = lastSlash < 0 ? "" : normalised.substring(0, lastSlash);
+        String filePattern = lastSlash < 0 ? normalised : normalised.substring(lastSlash + 1);
+        Path parent = dirPart.isEmpty() ? absoluteBase : absoluteBase.resolve(dirPart);
         if (!Files.isDirectory(parent)) return List.of();
         PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + filePattern);
         List<Path> out = new ArrayList<>();
