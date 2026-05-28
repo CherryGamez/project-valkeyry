@@ -1,0 +1,72 @@
+replicaCount: 3
+
+image:
+  repository: ghcr.io/your-org/valkeyry-ipaas
+  tag: 1.0.0-SNAPSHOT
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests: { cpu: 500m, memory: 1Gi }
+  limits:   { cpu: 2000m, memory: 2Gi }
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+
+oidc:
+  issuerUri: "https://oidc.example.com/realms/valkeyry"
+
+valkey:
+  url: "redis://valkey:6379"
+
+brokers:
+  default: kafka
+  kafka:
+    bootstrap: "kafka-bootstrap.kafka:9092"
+  rabbit:
+    uri: "amqp://rabbitmq.rabbitmq:5672/"
+  activemq:
+    url:  "tcp://activemq.activemq:61616"
+    user: "admin"
+    password: ""
+
+claimcheck:
+  enabled: true
+  thresholdBytes: 262144
+  s3:
+    bucket:   "valkeyry-claimcheck"
+    region:   "us-east-1"
+    endpoint: ""
+    pathStyle: true
+    accessKey: ""
+    secretKey: ""
+
+ratelimit:
+  enabled: true
+  capacity: 1000
+  refill:   1000
+  periodSeconds: 60
+
+ldap:
+  url:          "ldap://openldap:389"
+  baseDn:       "dc=valkeyry,dc=io"
+  userDn:       "uid={0},ou=people,dc=valkeyry,dc=io"
+  managerDn:    "cn=admin,dc=valkeyry,dc=io"
+  managerPass:  ""
+  tenantAttr:   "ou"
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities: { drop: ["ALL"] }

@@ -1,0 +1,196 @@
+version: "3.9"
+
+# Valkeyry iPaaS — local development sandbox.
+# Boots Postgres, Valkey, RabbitMQ, Kafka+Zookeeper, ActiveMQ Classic, MinIO (S3), and HashiCorp Vault dev.
+# Every port is mapped transparently to localhost so a Windows/macOS workstation can reach them directly.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ipaas
+      POSTGRES_USER: ipaas
+      POSTGRES_PASSWORD: ipaas
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ipaas"]
+      interval: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8.0
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports: ["6379:6379"]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    command: >
+      bash -c "rabbitmq-plugins enable --offline rabbitmq_prometheus &&
+               rabbitmq-server"
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management UI
+      - "15692:15692"   # Prometheus metrics
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports: ["2181:2181"]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on: [zookeeper]
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  activemq:
+    image: apache/activemq-classic:6.1.4
+    ports:
+      - "61616:61616"   # OpenWire
+      - "8161:8161"     # Web console (admin/admin)
+    environment:
+      ACTIVEMQ_ADMIN_PASSWORD: admin
+
+  minio:
+    image: minio/minio:RELEASE.2025-02-07T23-21-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio-bootstrap:
+    image: minio/mc:RELEASE.2025-02-06T05-32-25Z
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb -p local/ipaas-local || true;
+      exit 0;
+      "
+
+  vault:
+    image: hashicorp/vault:1.18
+    cap_add: ["IPC_LOCK"]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports: ["8200:8200"]
+
+  # ------------------------------------------------------------------------
+  # Ollama — local LLM runtime that backs the Spring AI ChatClient (default
+  # provider for the Operator Copilot). First start will be slow as it pulls
+  # the chosen model; subsequent starts are instant.
+  # Pull a model:
+  #     docker compose exec ollama ollama pull qwen2.5:7b
+  # Verify tools work:
+  #     curl http://localhost:11434/api/tags
+  # ------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:0.5.4
+    ports: ["11434:11434"]
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      retries: 6
+      start_period: 30s
+
+  # Helper container: on first compose-up, pulls the default Copilot model so
+  # `docker compose up -d` is truly one-command. Idempotent. Skip with
+  # `--scale ollama-bootstrap=0`.
+  ollama-bootstrap:
+    image: ollama/ollama:0.5.4
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      COPILOT_MODEL: ${COPILOT_MODEL:-qwen2.5:7b}
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Pulling Copilot model: '$$COPILOT_MODEL ;
+        until ollama list >/dev/null 2>&1; do sleep 2; done ;
+        ollama pull $$COPILOT_MODEL ;
+        exit 0;
+      "
+
+  ai-bridge:
+    build: ./ai-bridge
+    depends_on: [tempo]
+    environment:
+      EMERGENT_LLM_KEY:    ${EMERGENT_LLM_KEY:-}
+      AI_DEFAULT_PROVIDER: ${AI_DEFAULT_PROVIDER:-openai}
+      AI_DEFAULT_MODEL:    ${AI_DEFAULT_MODEL:-gpt-4.1-mini}
+      OTLP_HTTP_ENDPOINT:  http://tempo:4318/v1/traces
+      OTEL_SERVICE_NAME:   valkeyry-ai-bridge
+    ports: ["8090:8090"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health').read()"]
+      interval: 10s
+      retries: 6
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP — Java app + AI-bridge both ship spans here
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    ports: ["9090:9090"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    ports: ["3001:3000"]
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+
+  # ------------------------------------------------------------------------
+  # Optional Keycloak OIDC provider for local non-dev testing of the React
+  # Admin Console's "Sign in" flow. Activate with:
+  #     docker compose --profile auth up -d keycloak
+  # Then in /app/frontend/.env set:
+  #     REACT_APP_OIDC_AUTHORITY=http://localhost:8081/realms/ipaas
+  #     REACT_APP_OIDC_CLIENT_ID=valkeyry-console
+  # ------------------------------------------------------------------------
+  keycloak:
+    profiles: ["auth"]
+    image: quay.io/keycloak/keycloak:26.0.5
+    command: ["start-dev", "--http-port=8081"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports: ["8081:8081"]
+
+volumes:
+  ollama-models:
+    driver: local

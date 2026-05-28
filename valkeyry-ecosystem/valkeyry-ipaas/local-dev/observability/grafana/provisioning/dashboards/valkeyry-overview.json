@@ -1,0 +1,82 @@
+{
+  "title": "Valkeyry iPaaS Overview",
+  "uid": "valkeyry-ipaas-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "tags": ["valkeyry", "ipaas"],
+  "time": {"from": "now-30m", "to": "now"},
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "HTTP server request rate (req/s)",
+      "id": 1,
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (uri,method,status) (rate(http_server_requests_seconds_count{service=\"valkeyry-ipaas\"}[1m]))",
+         "legendFormat": "{{method}} {{uri}} ({{status}})"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "P95 HTTP latency (s)",
+      "id": 2,
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{service=\"valkeyry-ipaas\"}[5m])))",
+         "legendFormat": "{{uri}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM heap used (bytes)",
+      "id": 3,
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "jvm_memory_used_bytes{service=\"valkeyry-ipaas\",area=\"heap\"}",
+         "legendFormat": "{{id}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Reactor Netty active connections",
+      "id": 4,
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "reactor_netty_connection_provider_active_connections{service=\"valkeyry-ipaas\"}",
+         "legendFormat": "{{name}}"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Resilience4j — Circuit breaker state (outboundWebhook)",
+      "id": 5,
+      "gridPos": {"x": 0, "y": 16, "w": 8, "h": 6},
+      "targets": [
+        {"expr": "resilience4j_circuitbreaker_state{service=\"valkeyry-ipaas\",name=\"outboundWebhook\"}",
+         "legendFormat": "{{state}}"}
+      ],
+      "options": {"colorMode": "background"}
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbound webhook retries",
+      "id": 6,
+      "gridPos": {"x": 8, "y": 16, "w": 8, "h": 6},
+      "targets": [
+        {"expr": "sum by (kind) (rate(resilience4j_retry_calls_total{service=\"valkeyry-ipaas\",name=\"outboundWebhook\"}[1m]))",
+         "legendFormat": "{{kind}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "RabbitMQ queue depth (ready)",
+      "id": 7,
+      "gridPos": {"x": 16, "y": 16, "w": 8, "h": 6},
+      "targets": [
+        {"expr": "rabbitmq_queue_messages_ready{service=\"rabbitmq\"}",
+         "legendFormat": "{{queue}}"}
+      ]
+    }
+  ]
+}

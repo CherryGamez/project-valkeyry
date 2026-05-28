@@ -1,0 +1,8 @@
+io/valkeyry/ipaas/consumer/DynamicConsumerManagerTest.class
+io/valkeyry/ipaas/interceptor/SpringAiEnrichmentEngineTest.class
+io/valkeyry/ipaas/secret/ReactiveVaultSecretManagerTest.class
+io/valkeyry/ipaas/routing/DynamicTransformationRoutingEngineTest.class
+io/valkeyry/ipaas/publish/MultiTenantPublishServiceTest.class
+io/valkeyry/ipaas/metrics/MetricsTagConfigTest.class
+io/valkeyry/ipaas/interceptor/AiEnrichmentInterceptorTest.class
+io/valkeyry/ipaas/integration/DynamicPlatformIntegrationTest.class

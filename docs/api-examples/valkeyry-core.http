@@ -1,0 +1,44 @@
+### Publish a small message via the default broker (Kafka stream)
+POST http://localhost:8082/api/v1/tenants/acme-prod/messages
+Content-Type: application/json
+Authorization: Bearer {{oidc_token}}
+
+{
+  "destination": "orders.new",
+  "mode": "STREAM",
+  "headers": { "content-type": "application/json" },
+  "payload": "eyJvcmRlcklkIjoiMTIzIiwic3RhdHVzIjoiUExBQ0VEIn0="
+}
+
+### Publish to RabbitMQ (queue) with broker override
+POST http://localhost:8082/api/v1/tenants/acme-prod/messages
+Content-Type: application/json
+Authorization: Bearer {{oidc_token}}
+
+{
+  "destination": "billing.events",
+  "broker": "rabbit",
+  "mode": "QUEUE",
+  "headers": { "content-type": "application/json" },
+  "payload": "eyJpZCI6IjQyIn0="
+}
+
+### Publish to ActiveMQ
+POST http://localhost:8082/api/v1/tenants/acme-prod/messages
+Content-Type: application/json
+Authorization: Bearer {{oidc_token}}
+
+{
+  "destination": "legacy.queue",
+  "broker": "activemq",
+  "mode": "QUEUE",
+  "headers": { "content-type": "application/json" },
+  "payload": "eyJpZCI6IjQyIn0="
+}
+
+### Subscribe (SSE) — auto-resolves claim-check on the fly
+GET http://localhost:8082/api/v1/tenants/acme-prod/messages/subscribe?destination=orders.new&broker=kafka&mode=STREAM
+Accept: text/event-stream
+Authorization: Bearer {{oidc_token}}
+
+

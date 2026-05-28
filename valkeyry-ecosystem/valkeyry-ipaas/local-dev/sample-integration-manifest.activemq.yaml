@@ -1,0 +1,11 @@
+# ActiveMQ MANY_TO_ONE consolidation example.
+topologyName: sample-consolidate-activemq
+topologyType: MANY_TO_ONE
+processingMode: QUEUE
+brokerType: ACTIVEMQ
+sources:
+  - region.us.orders
+  - region.eu.orders
+  - region.apac.orders
+targets:
+  - destination: global.orders

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.valkeyry</groupId>
+        <artifactId>valkeyry-config-plugin</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>valkeyry-config-gradle-plugin</artifactId>
+    <packaging>jar</packaging>
+    <name>Valkeyry Config :: Gradle Plugin</name>
+    <description>Gradle Plugin that adds a `valkeyryConfigPush` task — wraps plugin-core. Built with Maven for source uniformity; can also be published via Gradle if desired (see gradle-plugin/build.gradle.kts).</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <gradle-api.version>8.10</gradle-api.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.valkeyry</groupId>
+            <artifactId>valkeyry-config-plugin-core</artifactId>
+            <version>1.0.0-SNAPSHOT</version>
+        </dependency>
+        <!--
+            Gradle API is normally provided by Gradle at runtime via `gradleApi()`.
+            For Maven builds (compile-only) we depend on the re-published Gradle API
+            jar (`dev.gradleplugins:gradle-api`) which mirrors org.gradle.api.* from
+            Maven Central. The tooling-api jar does NOT expose DefaultTask/Task/Project.
+        -->
+        <dependency>
+            <groupId>dev.gradleplugins</groupId>
+            <artifactId>gradle-api</artifactId>
+            <version>${gradle-api.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.3</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <repositories>
+        <repository>
+            <id>gradle-libs</id>
+            <url>https://repo.gradle.org/gradle/libs-releases</url>
+        </repository>
+    </repositories>
+</project>

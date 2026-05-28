@@ -1,0 +1,4 @@
+io/valkeyry/plugin/core/PluginEngineMockServerTest.class
+io/valkeyry/plugin/core/hash/PayloadFingerprintTest.class
+io/valkeyry/plugin/core/manifest/ManifestLoaderTest.class
+io/valkeyry/plugin/core/PluginEngineMockServerTest$TestLog.class

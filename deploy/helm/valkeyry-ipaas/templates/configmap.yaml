@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vk.fullname" . }}
+  labels: {{- include "vk.labels" . | nindent 4 }}
+data:
+  VALKEYRY_IPAAS_PORT:           "8082"
+  VALKEYRY_VALKEY_URL:          {{ .Values.valkey.url           | quote }}
+  VALKEYRY_OIDC_ISSUER:         {{ .Values.oidc.issuerUri       | quote }}
+  VALKEYRY_BROKER_DEFAULT:      {{ .Values.brokers.default      | quote }}
+  VALKEYRY_KAFKA_BOOTSTRAP:     {{ .Values.brokers.kafka.bootstrap | quote }}
+  VALKEYRY_RABBIT_URI:          {{ .Values.brokers.rabbit.uri   | quote }}
+  VALKEYRY_ACTIVEMQ_URL:        {{ .Values.brokers.activemq.url | quote }}
+  VALKEYRY_ACTIVEMQ_USER:       {{ .Values.brokers.activemq.user | quote }}
+  VALKEYRY_S3_BUCKET:           {{ .Values.claimcheck.s3.bucket   | quote }}
+  VALKEYRY_S3_REGION:           {{ .Values.claimcheck.s3.region   | quote }}
+  VALKEYRY_S3_ENDPOINT:         {{ .Values.claimcheck.s3.endpoint | quote }}
+  VALKEYRY_S3_PATH_STYLE:       {{ .Values.claimcheck.s3.pathStyle | quote }}
+  VALKEYRY_CLAIMCHECK_ENABLED:  {{ .Values.claimcheck.enabled    | quote }}
+  VALKEYRY_CLAIMCHECK_THRESHOLD: {{ .Values.claimcheck.thresholdBytes | quote }}
+  VALKEYRY_RATELIMIT_ENABLED:   {{ .Values.ratelimit.enabled     | quote }}
+  VALKEYRY_RATELIMIT_CAPACITY:  {{ .Values.ratelimit.capacity    | quote }}
+  VALKEYRY_RATELIMIT_REFILL:    {{ .Values.ratelimit.refill      | quote }}
+  VALKEYRY_RATELIMIT_PERIOD:    {{ .Values.ratelimit.periodSeconds | quote }}
+  VALKEYRY_LDAP_URL:            {{ .Values.ldap.url              | quote }}
+  VALKEYRY_LDAP_BASE:           {{ .Values.ldap.baseDn           | quote }}
+  VALKEYRY_LDAP_USER_DN:        {{ .Values.ldap.userDn           | quote }}
+  VALKEYRY_LDAP_MANAGER_DN:     {{ .Values.ldap.managerDn        | quote }}
+  VALKEYRY_LDAP_TENANT_ATTR:    {{ .Values.ldap.tenantAttr       | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "vk.fullname" . }}
+  labels: {{- include "vk.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  VALKEYRY_S3_AK:              {{ .Values.claimcheck.s3.accessKey | quote }}
+  VALKEYRY_S3_SK:              {{ .Values.claimcheck.s3.secretKey | quote }}
+  VALKEYRY_ACTIVEMQ_PASS:      {{ .Values.brokers.activemq.password | quote }}
+  VALKEYRY_LDAP_MANAGER_PW:    {{ .Values.ldap.managerPass        | quote }}

@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkeyry-ipaas
+  namespace: valkeyry
+data:
+  VALKEYRY_IPAAS_PORT: "8082"
+  VALKEYRY_VALKEY_URL: "redis://valkey:6379"
+  VALKEYRY_OIDC_ISSUER: "https://oidc.example.com/realms/valkeyry"
+  VALKEYRY_BROKER_DEFAULT: "kafka"
+  VALKEYRY_KAFKA_BOOTSTRAP: "kafka-bootstrap.kafka:9092"
+  VALKEYRY_RABBIT_URI: "amqp://rabbitmq.rabbitmq:5672/"
+  VALKEYRY_ACTIVEMQ_URL: "tcp://activemq.activemq:61616"
+  VALKEYRY_S3_BUCKET: "valkeyry-claimcheck"
+  VALKEYRY_S3_REGION: "us-east-1"
+  VALKEYRY_CLAIMCHECK_THRESHOLD: "262144"
+  VALKEYRY_RATELIMIT_CAPACITY: "1000"
+  VALKEYRY_RATELIMIT_REFILL: "1000"
+  VALKEYRY_RATELIMIT_PERIOD: "60"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: valkeyry-ipaas-secrets
+  namespace: valkeyry
+type: Opaque
+stringData:
+  VALKEYRY_S3_AK: ""
+  VALKEYRY_S3_SK: ""
+  VALKEYRY_LDAP_MANAGER_PW: change-me-in-prod
+  VALKEYRY_ACTIVEMQ_USER: admin
+  VALKEYRY_ACTIVEMQ_PASS: change-me-in-prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkeyry-ipaas
+  namespace: valkeyry
+  labels:
+    app: valkeyry-ipaas
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: valkeyry-ipaas
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: valkeyry-ipaas
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/your-org/valkeyry-ipaas:1.0.0-SNAPSHOT
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8082
+          envFrom:
+            - configMapRef: { name: valkeyry-ipaas }
+            - secretRef:    { name: valkeyry-ipaas-secrets }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: 2000m, memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkeyry-ipaas
+  namespace: valkeyry
+spec:
+  type: ClusterIP
+  selector:
+    app: valkeyry-ipaas
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: valkeyry-ipaas
+  namespace: valkeyry
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: valkeyry-ipaas
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

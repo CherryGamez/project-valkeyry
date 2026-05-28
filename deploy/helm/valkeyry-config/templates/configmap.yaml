@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vk.fullname" . }}
+  labels: {{- include "vk.labels" . | nindent 4 }}
+data:
+  VALKEYRY_CONFIG_PORT: "8081"
+  VALKEYRY_CONFIG_R2DBC_URL: {{ .Values.postgres.r2dbcUrl | quote }}
+  VALKEYRY_CONFIG_JDBC_URL:  {{ .Values.postgres.jdbcUrl  | quote }}
+  VALKEYRY_OIDC_ISSUER:      {{ .Values.oidc.issuerUri    | quote }}
+  VALKEYRY_LDAP_URL:         {{ .Values.ldap.url          | quote }}
+  VALKEYRY_LDAP_BASE:        {{ .Values.ldap.baseDn       | quote }}
+  VALKEYRY_LDAP_USER_DN:     {{ .Values.ldap.userDn       | quote }}
+  VALKEYRY_LDAP_MANAGER_DN:  {{ .Values.ldap.managerDn    | quote }}
+  VALKEYRY_LDAP_TENANT_ATTR: {{ .Values.ldap.tenantAttr   | quote }}
+  VALKEYRY_AUDIT_WEBHOOK_ENABLED:    {{ .Values.auditWebhook.enabled    | quote }}
+  VALKEYRY_AUDIT_WEBHOOK_URLS:       {{ .Values.auditWebhook.urls       | quote }}
+  VALKEYRY_AUDIT_WEBHOOK_TIMEOUT_MS: {{ .Values.auditWebhook.timeoutMs  | quote }}
+  VALKEYRY_AUDIT_WEBHOOK_MAX_RETRIES: {{ .Values.auditWebhook.maxRetries | quote }}
+  VALKEYRY_AUDIT_WEBHOOK_BACKOFF_MS: {{ .Values.auditWebhook.initialBackoffMs | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "vk.fullname" . }}
+  labels: {{- include "vk.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  VALKEYRY_CONFIG_DB_USER:   {{ .Values.postgres.user        | quote }}
+  VALKEYRY_CONFIG_DB_PASS:   {{ .Values.postgres.password    | quote }}
+  VALKEYRY_API_KEYS:         {{ .Values.apiKeys.table        | quote }}
+  VALKEYRY_LDAP_MANAGER_PW:  {{ .Values.ldap.managerPass     | quote }}
+  VALKEYRY_AUDIT_WEBHOOK_SECRET: {{ .Values.auditWebhook.secret | quote }}

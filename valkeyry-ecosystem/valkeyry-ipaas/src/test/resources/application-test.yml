@@ -1,0 +1,18 @@
+spring:
+  r2dbc:
+    url: r2dbc:tc:postgresql:///ipaas?TC_IMAGE_TAG=16-alpine
+    username: test
+    password: test
+  flyway:
+    url: jdbc:tc:postgresql:16-alpine:///ipaas
+    user: test
+    password: test
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ""
+
+management:
+  tracing:
+    enabled: false

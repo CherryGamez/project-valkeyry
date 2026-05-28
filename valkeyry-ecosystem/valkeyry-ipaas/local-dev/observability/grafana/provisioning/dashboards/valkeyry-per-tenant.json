@@ -1,0 +1,139 @@
+{
+  "title": "Valkeyry iPaaS — Per Tenant / Project",
+  "uid": "valkeyry-ipaas-per-tenant",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "tags": ["valkeyry", "ipaas", "multi-tenant"],
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "label": "Tenant",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_server_requests_seconds_count{service=\"valkeyry-ipaas\"}, tenant_id)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "project_id",
+        "label": "Project",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(http_server_requests_seconds_count{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\"}, project_id)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Selected Tenant / Project",
+      "id": 100,
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "count(http_server_requests_seconds_count{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\"}) > 0",
+         "legendFormat": "$tenant_id / $project_id"}
+      ],
+      "options": {"colorMode": "value", "textMode": "value_and_name", "graphMode": "none"}
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests / sec (per project)",
+      "id": 1,
+      "gridPos": {"x": 6, "y": 0, "w": 18, "h": 8},
+      "targets": [
+        {"expr": "sum by (tenant_id, project_id, status) (rate(http_server_requests_seconds_count{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\"}[1m]))",
+         "legendFormat": "{{tenant_id}}/{{project_id}} ({{status}})"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency (per project)",
+      "id": 2,
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le, tenant_id, project_id) (rate(http_server_requests_seconds_bucket{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\"}[5m])))",
+         "legendFormat": "{{tenant_id}}/{{project_id}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p99 latency (per project)",
+      "id": 3,
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.99, sum by (le, tenant_id, project_id) (rate(http_server_requests_seconds_bucket{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\"}[5m])))",
+         "legendFormat": "{{tenant_id}}/{{project_id}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx error rate",
+      "id": 4,
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (tenant_id, project_id) (rate(http_server_requests_seconds_count{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\",status=~\"5..\"}[1m]))",
+         "legendFormat": "{{tenant_id}}/{{project_id}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate-limit 429s",
+      "id": 5,
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (tenant_id, project_id) (rate(http_server_requests_seconds_count{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\",status=\"429\"}[1m]))",
+         "legendFormat": "{{tenant_id}}/{{project_id}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Top endpoints by RPS (selected scope)",
+      "id": 6,
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 8},
+      "targets": [
+        {"expr": "topk(10, sum by (uri, method) (rate(http_server_requests_seconds_count{service=\"valkeyry-ipaas\",tenant_id=~\"$tenant_id\",project_id=~\"$project_id\"}[1m])))",
+         "legendFormat": "{{method}} {{uri}}"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Circuit-breaker state (outboundWebhook)",
+      "id": 7,
+      "gridPos": {"x": 0, "y": 32, "w": 8, "h": 6},
+      "targets": [
+        {"expr": "resilience4j_circuitbreaker_state{service=\"valkeyry-ipaas\",name=\"outboundWebhook\"}",
+         "legendFormat": "{{state}}"}
+      ],
+      "options": {"colorMode": "background"}
+    },
+    {
+      "type": "timeseries",
+      "title": "RabbitMQ queue depth (matching tenant/project)",
+      "id": 8,
+      "gridPos": {"x": 8, "y": 32, "w": 16, "h": 6},
+      "targets": [
+        {"expr": "rabbitmq_queue_messages_ready{queue=~\"$tenant_id\\\\.$project_id\\\\..*\"}",
+         "legendFormat": "{{queue}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Copilot tool invocations / sec",
+      "id": 9,
+      "gridPos": {"x": 0, "y": 38, "w": 24, "h": 6},
+      "targets": [
+        {"expr": "rate(valkeyry_copilot_tool_invocations_total[1m])",
+         "legendFormat": "tool invocations"}
+      ]
+    }
+  ]
+}

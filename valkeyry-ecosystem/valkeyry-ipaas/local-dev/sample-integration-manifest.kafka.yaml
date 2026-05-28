@@ -1,0 +1,11 @@
+# Kafka equivalent of the sample fan-out topology.
+topologyName: sample-fanout-kafka
+topologyType: ONE_TO_MANY
+processingMode: STREAMING
+brokerType: KAFKA
+sources:
+  - ingress.events
+targets:
+  - destination: downstream.analytics
+  - destination: downstream.audit
+  - destination: downstream.ml-features

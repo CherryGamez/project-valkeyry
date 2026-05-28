@@ -1,0 +1,17 @@
+# =============================================================================
+# Sample ONE_TO_MANY routing topology — RabbitMQ + streaming mode.
+# POST this manifest YAML (as the `manifestYaml` field) to:
+#   POST /api/v1/{tenantId}/{projectId}/topologies
+# Then trigger deploy via:
+#   POST /api/v1/{tenantId}/{projectId}/topologies/sample-fanout/deploy
+# =============================================================================
+topologyName: sample-fanout
+topologyType: ONE_TO_MANY
+processingMode: STREAMING
+brokerType: RABBITMQ
+sources:
+  - ingress.events
+targets:
+  - destination: downstream.analytics
+  - destination: downstream.audit
+  - destination: downstream.ml-features

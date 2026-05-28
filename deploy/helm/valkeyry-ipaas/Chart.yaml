@@ -1,0 +1,12 @@
+apiVersion: v2
+name: valkeyry-ipaas
+description: Reactive Messaging & Streaming Engine for the Valkeyry ecosystem.
+type: application
+version: 1.0.0
+appVersion: "1.0.0-SNAPSHOT"
+keywords: [valkeyry, messaging, kafka, rabbitmq, activemq, claim-check]
+home: https://github.com/your-org/valkeyry
+sources:
+  - https://github.com/your-org/valkeyry
+maintainers:
+  - name: valkeyry

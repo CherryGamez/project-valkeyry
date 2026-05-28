@@ -1,0 +1,86 @@
+server:
+  port: ${VALKEYRY_CONFIG_PORT:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: valkeyry-config
+  # ----- R2DBC (runtime, reactive) -----
+  r2dbc:
+    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://localhost:5432/valkeyry_config}
+    username: ${VALKEYRY_CONFIG_DB_USER:valkeyry}
+    password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
+    pool:
+      enabled: true
+      initial-size: 4
+      max-size: 32
+      max-idle-time: 5m
+  # ----- Flyway (bootstrap, blocking JDBC) -----
+  flyway:
+    enabled: true
+    url: ${VALKEYRY_CONFIG_JDBC_URL:jdbc:postgresql://localhost:5432/valkeyry_config}
+    user: ${VALKEYRY_CONFIG_DB_USER:valkeyry}
+    password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  # ----- OIDC resource server (Track 1) -----
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${VALKEYRY_OIDC_ISSUER:http://localhost:8079/default}
+  codec:
+    max-in-memory-size: 8MB
+
+# ---------- App-specific ----------
+valkeyry:
+  ldap:
+    url: ${VALKEYRY_LDAP_URL:ldap://localhost:1389}
+    base-dn: ${VALKEYRY_LDAP_BASE:dc=valkeyry,dc=io}
+    user-dn-pattern: ${VALKEYRY_LDAP_USER_DN:uid={0},ou=people,dc=valkeyry,dc=io}
+    tenant-attribute: ${VALKEYRY_LDAP_TENANT_ATTR:ou}
+    manager-dn: ${VALKEYRY_LDAP_MANAGER_DN:cn=admin,dc=valkeyry,dc=io}
+    manager-password: ${VALKEYRY_LDAP_MANAGER_PW:admin}
+  api-keys:
+    # Comma-sep list of "key:tenant,tenant" tuples — disabled in prod (use LDAP).
+    table: ${VALKEYRY_API_KEYS:}
+  audit:
+    webhook:
+      enabled:           ${VALKEYRY_AUDIT_WEBHOOK_ENABLED:false}
+      # comma-separated list when set via env var (Spring binds CSV→List)
+      urls:              ${VALKEYRY_AUDIT_WEBHOOK_URLS:}
+      secret:            ${VALKEYRY_AUDIT_WEBHOOK_SECRET:}
+      timeout-ms:        ${VALKEYRY_AUDIT_WEBHOOK_TIMEOUT_MS:5000}
+      max-retries:       ${VALKEYRY_AUDIT_WEBHOOK_MAX_RETRIES:3}
+      initial-backoff-ms: ${VALKEYRY_AUDIT_WEBHOOK_BACKOFF_MS:200}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  health:
+    r2dbc:
+      enabled: true
+
+logging:
+  level:
+    io.valkeyry: INFO
+    org.springframework.r2dbc: INFO
+    org.springframework.security: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: test
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+valkeyry:
+  api-keys:
+    # Used by integration tests for the headless plugin path.
+    table: ${VALKEYRY_TEST_API_KEYS:plugin-test-key:demo-tenant}

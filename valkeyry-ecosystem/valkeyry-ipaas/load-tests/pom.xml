@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.valkeyry</groupId>
+    <artifactId>valkeyry-load-tests</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>Valkeyry iPaaS — Gatling load tests</name>
+    <description>
+        Standalone Gatling simulations targeting a running Valkeyry instance.
+        Build: mvn -f load-tests/pom.xml clean test
+        Run one:  mvn -f load-tests/pom.xml gatling:test \
+                       -Dgatling.simulationClass=io.valkeyry.loadtests.PublishSimulation
+        Run all:  mvn -f load-tests/pom.xml gatling:test
+        Reports:  load-tests/target/gatling/
+    </description>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <gatling.version>3.13.4</gatling.version>
+        <gatling-maven-plugin.version>4.17.4</gatling-maven-plugin.version>
+        <ipaas.base-url>http://localhost:8080</ipaas.base-url>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.gatling.highcharts</groupId>
+            <artifactId>gatling-charts-highcharts</artifactId>
+            <version>${gatling.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <testSourceDirectory>src/test/java</testSourceDirectory>
+        <plugins>
+            <plugin>
+                <groupId>io.gatling</groupId>
+                <artifactId>gatling-maven-plugin</artifactId>
+                <version>${gatling-maven-plugin.version}</version>
+                <configuration>
+                    <jvmArgs>
+                        <jvmArg>-Dvalkeyry.base-url=${ipaas.base-url}</jvmArg>
+                    </jvmArgs>
+                    <runMultipleSimulations>true</runMultipleSimulations>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: valkeyry
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkeyry-config
+  namespace: valkeyry
+data:
+  VALKEYRY_CONFIG_PORT: "8081"
+  VALKEYRY_CONFIG_R2DBC_URL: "r2dbc:postgresql://postgres:5432/valkeyry_config"
+  VALKEYRY_CONFIG_JDBC_URL: "jdbc:postgresql://postgres:5432/valkeyry_config"
+  VALKEYRY_OIDC_ISSUER: "https://oidc.example.com/realms/valkeyry"
+  VALKEYRY_LDAP_URL: "ldap://openldap:389"
+  VALKEYRY_LDAP_BASE: "dc=valkeyry,dc=io"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: valkeyry-config-secrets
+  namespace: valkeyry
+type: Opaque
+stringData:
+  VALKEYRY_CONFIG_DB_USER: valkeyry
+  VALKEYRY_CONFIG_DB_PASS: change-me-in-prod
+  VALKEYRY_API_KEYS: ""        # populate with "key:tenantA,tenantB;…" if you use API-keys
+  VALKEYRY_LDAP_MANAGER_PW: change-me-in-prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkeyry-config
+  namespace: valkeyry
+  labels:
+    app: valkeyry-config
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: valkeyry-config
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: valkeyry-config
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/your-org/valkeyry-config:1.0.0-SNAPSHOT
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef:  { name: valkeyry-config }
+            - secretRef:     { name: valkeyry-config-secrets }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits:   { cpu: 1500m, memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkeyry-config
+  namespace: valkeyry
+spec:
+  type: ClusterIP
+  selector:
+    app: valkeyry-config
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

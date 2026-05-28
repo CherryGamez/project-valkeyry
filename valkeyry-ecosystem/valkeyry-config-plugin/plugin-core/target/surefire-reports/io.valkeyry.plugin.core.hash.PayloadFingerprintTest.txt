@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: io.valkeyry.plugin.core.hash.PayloadFingerprintTest
+-------------------------------------------------------------------------------
+Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.375 s -- in io.valkeyry.plugin.core.hash.PayloadFingerprintTest

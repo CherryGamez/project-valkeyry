@@ -1,0 +1,39 @@
+{
+  "title": "Valkeyry iPaaS — Distributed Traces",
+  "uid": "valkeyry-ipaas-traces",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["valkeyry", "traces", "ipaas"],
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "type": "traces",
+      "title": "Recent traces — Java + AI-bridge (live)",
+      "id": 1,
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 14},
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "targets": [
+        {
+          "queryType": "traceqlSearch",
+          "query": "{service.name=~\"valkeyry-.*\"}",
+          "limit": 50,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "nodeGraph",
+      "title": "Service map (Java → AI-bridge → provider)",
+      "id": 2,
+      "gridPos": {"x": 0, "y": 14, "w": 24, "h": 10},
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "targets": [
+        {
+          "queryType": "serviceMap",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+/app/valkeyry-ecosystem/valkeyry-config-plugin/plugin-core/src/test/java/io/valkeyry/plugin/core/PluginEngineMockServerTest.java
+/app/valkeyry-ecosystem/valkeyry-config-plugin/plugin-core/src/test/java/io/valkeyry/plugin/core/hash/PayloadFingerprintTest.java
+/app/valkeyry-ecosystem/valkeyry-config-plugin/plugin-core/src/test/java/io/valkeyry/plugin/core/manifest/ManifestLoaderTest.java

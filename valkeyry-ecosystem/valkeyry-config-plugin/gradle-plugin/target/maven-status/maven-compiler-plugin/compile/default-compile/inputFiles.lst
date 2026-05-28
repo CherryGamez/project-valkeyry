@@ -1,0 +1,3 @@
+/app/valkeyry-ecosystem/valkeyry-config-plugin/gradle-plugin/src/main/java/io/valkeyry/plugin/gradle/PushTask.java
+/app/valkeyry-ecosystem/valkeyry-config-plugin/gradle-plugin/src/main/java/io/valkeyry/plugin/gradle/ValkeyryConfigExtension.java
+/app/valkeyry-ecosystem/valkeyry-config-plugin/gradle-plugin/src/main/java/io/valkeyry/plugin/gradle/ValkeyryConfigPlugin.java

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: valkeyry-config
+description: Headless Schema Registry Engine for the Valkeyry ecosystem.
+type: application
+version: 1.0.0
+appVersion: "1.0.0-SNAPSHOT"
+keywords: [valkeyry, schema-registry, jsonb, multi-tenant]
+home: https://github.com/your-org/valkeyry
+sources:
+  - https://github.com/your-org/valkeyry
+maintainers:
+  - name: valkeyry

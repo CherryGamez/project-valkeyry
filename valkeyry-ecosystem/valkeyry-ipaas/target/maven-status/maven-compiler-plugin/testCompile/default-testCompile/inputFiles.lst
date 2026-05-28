@@ -1,0 +1,8 @@
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/consumer/DynamicConsumerManagerTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/integration/DynamicPlatformIntegrationTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/interceptor/AiEnrichmentInterceptorTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/interceptor/SpringAiEnrichmentEngineTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/metrics/MetricsTagConfigTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/publish/MultiTenantPublishServiceTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/routing/DynamicTransformationRoutingEngineTest.java
+/app/valkeyry-ecosystem/valkeyry-ipaas/src/test/java/io/valkeyry/ipaas/secret/ReactiveVaultSecretManagerTest.java
