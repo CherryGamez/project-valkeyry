@@ -2,6 +2,7 @@ package io.valkeyry.config.domain;
 
 import io.r2dbc.postgresql.codec.Json;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
@@ -17,7 +18,7 @@ import java.util.UUID;
  * a side-by-side view without re-querying the registry.</p>
  */
 @Table("config_audit_log")
-public class ConfigAuditEntry {
+public class ConfigAuditEntry implements UuidEntity {
 
     @Id @Column("id")             private UUID id;
     @Column("tenant_id")          private String tenantId;
@@ -31,9 +32,12 @@ public class ConfigAuditEntry {
     @Column("changed_at")         private Instant changedAt;
     @Column("request_id")         private String requestId;
 
+    @Transient
+    private boolean isNew = true;
+
     public ConfigAuditEntry() {}
 
-    public UUID getId() { return id; }                       public void setId(UUID id) { this.id = id; }
+    @Override public UUID getId() { return id; }             public void setId(UUID id) { this.id = id; }
     public String getTenantId() { return tenantId; }         public void setTenantId(String v) { this.tenantId = v; }
     public String getTableName() { return tableName; }       public void setTableName(String v) { this.tableName = v; }
     public String getOperation() { return operation; }       public void setOperation(String v) { this.operation = v; }
@@ -44,4 +48,7 @@ public class ConfigAuditEntry {
     public String getActorTrack() { return actorTrack; }     public void setActorTrack(String v) { this.actorTrack = v; }
     public Instant getChangedAt() { return changedAt; }      public void setChangedAt(Instant v) { this.changedAt = v; }
     public String getRequestId() { return requestId; }       public void setRequestId(String v) { this.requestId = v; }
+
+    @Override public boolean isNew() { return isNew; }
+    @Override public void markPersisted() { this.isNew = false; }
 }

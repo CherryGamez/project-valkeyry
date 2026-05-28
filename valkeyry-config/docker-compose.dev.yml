@@ -1,0 +1,61 @@
+# Valkeyry Config — local dev orchestration
+#
+# Spins up the bare minimum to run ValkeyryConfigApplication:
+#   - Postgres 16 with the right database, user, and schema pre-created
+#
+# Then you can either run the app from your IDE (env vars are auto-loaded from .env.dev),
+# or run `docker compose up app` to start the packaged jar.
+#
+# Quick start:
+#   docker compose -f docker-compose.dev.yml up -d postgres
+#   # then in your IDE: Run → ValkeyryConfigApplication
+#   # or, all-in-docker:
+#   mvn -pl valkeyry-config -am -DskipTests package
+#   docker compose -f docker-compose.dev.yml up app
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: valkeyry-config-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       valkeyry_config
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: valkeyry
+    ports:
+      - "5432:5432"
+    volumes:
+      - valkeyry_pg_data:/var/lib/postgresql/data
+      - ./db/init/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "valkeyry_config"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: valkeyry-config-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      # R2DBC (runtime, reactive) + JDBC (Flyway bootstrap) point at the postgres service.
+      VALKEYRY_CONFIG_R2DBC_URL: "r2dbc:postgresql://postgres:5432/valkeyry_config?schema=valkeyry_config"
+      VALKEYRY_CONFIG_JDBC_URL:  "jdbc:postgresql://postgres:5432/valkeyry_config"
+      VALKEYRY_CONFIG_DB_USER:   postgres
+      VALKEYRY_CONFIG_DB_PASS:   valkeyry
+      # Demo API-key map — single tenant, single key. Production should use OIDC + LDAP.
+      VALKEYRY_API_KEYS:         "plugin-test-key:demo-tenant"
+      # Disable upstream OIDC issuer check for local dev (no JWT requests will arrive).
+      VALKEYRY_OIDC_ISSUER:      "http://localhost:8079/default"
+      VALKEYRY_AUDIT_WEBHOOK_ENABLED: "false"
+
+volumes:
+  valkeyry_pg_data:

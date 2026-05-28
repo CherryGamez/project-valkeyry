@@ -84,12 +84,28 @@ Toolchain: JDK 21 (Temurin), Maven 3.8.7+, Docker for Testcontainers.
   in `htmx:beforeSwap`, parsed, and rendered as a list of `path — message` rows inside the
   closest open dialog's `data-testid$="-error"` slot. Form input is **never** lost.
 
-## Verification
-- **Maven build**: `mvn -pl valkeyry-config -am -B -ntp clean compile` → SUCCESS (45 sources).
-- **Unit tests (2026-02-12)**: `mvn -pl valkeyry-config -am -Dtest='AuditWebhookPublisherTest,JsonSchemaValidatorServiceTest,PayloadFingerprintTest,VirtualTableControllerSliceTest' test` → **15/15 passing**.
-- **Updated test**: `AuditWebhookPublisherTest.fanOutToMultipleUrls` now uses two distinct URLs (`/ok` + `/ok2`) instead of duplicates, since the publisher now dedupes targets by URL — semantically more correct.
-- **Frontend (manual, mocked-API end-to-end)**: A local `python3 -m http.server` served the static index.html. Playwright `page.route()` mocked the REST surface. Verified every panel in the new iPhone-themed UI: sidebar populated, table click → entry CRUD grid, audit timeline with rollback button for record-level events only, webhook panel with add/list/remove + enabled/disabled/override-secret badges, schema-violation path returns 422 → inline error rendered, user input preserved.
-- **Testcontainers integration test** not executed in this sandbox (no Docker). User can run locally with `mvn -pl valkeyry-config verify`.
+### 2026-02-12 — Fix: app couldn't actually start at runtime
+While the build was green, running `ValkeyryConfigApplication` against a real Postgres failed silently with three latent bugs (none caught by the existing slice tests):
+
+1. **Bean wiring**: `AuditWebhookPublisher` was annotated `@Configuration` (CGLIB-proxied). Adding the test-friendly 2-arg constructor confused Spring's ctor selection → `"No default constructor found"`. **Fix**: drop the misleading `@Configuration` annotation (the class defines no `@Bean` methods), keep `@Component`, and mark the 3-arg ctor `@Autowired` to disambiguate.
+2. **R2DBC search path**: Flyway places tables in the `valkeyry_config` schema but the R2DBC URL didn't tell the driver to search it → `relation "virtual_table_registry" does not exist` at every query. **Fix**: append `?schema=valkeyry_config` to the default R2DBC URL in `application.yml`, `.env.dev`, and `docker-compose.dev.yml`.
+3. **Manually-assigned UUIDs → INSERT becomes UPDATE**: `SimpleR2dbcRepository.save()` checks `Persistable.isNew()` to decide between INSERT and UPDATE; with our manually-set UUID PKs it defaulted to UPDATE → `"Row with Id [...] does not exist"`. **Fix**: have every UUID-keyed entity (`VirtualTableRegistry`, `VirtualTableEntry`, `ConfigAuditEntry`, `AuditWebhookSubscription`) implement a new `UuidEntity` marker interface (extends `Persistable<UUID>`) with a `@Transient isNew = true` flag, plus a single shared `UuidEntityIsNewCallback` (Spring Data R2DBC `AfterConvertCallback`) that flips the flag after loads. New objects route to INSERT; loaded ones route to UPDATE.
+
+Also added a `@ExceptionHandler(DuplicateKeyException.class)` → `409 Conflict` with a stable `urn:valkeyry:error:duplicate-resource` Problem+JSON type, so the webhook UI gets a clean error when the same URL is re-added.
+
+### 2026-02-12 — Local dev quick-start
+- `valkeyry-config/docker-compose.dev.yml` — Postgres 16 + optional app container, pre-creates schema via init script.
+- `valkeyry-config/.env.dev` — env vars matching the compose file for IDE runs.
+- `valkeyry-config/db/init/01-schema.sql` — bootstraps the `valkeyry_config` schema on a fresh Postgres volume.
+- README updated with **Option A** (one-command `docker compose up`) and **Option B** (IDE-run + Postgres-in-Docker) + a troubleshooting table.
+
+**Manual smoke test (against a real Postgres in this sandbox):** All endpoints verified working end-to-end:
+- `POST /tables` → 201 (declare); subsequent declares → REVISE_TABLE.
+- `POST /tables/.../entries` → 201 (insert, new version).
+- `POST /tables/.../entries` (same data) → 409 (idempotency-skip).
+- `DELETE /tables/.../entries/{key}` → 204.
+- `POST /webhooks` → 201; same URL again → 409 with proper `urn:valkeyry:error:duplicate-resource` body.
+- `POST /audit/{id}/rollback` → 201 — restored Alice's `fullName` to "Alice" as v4 after a v3 update to "Alice Updated".
 
 ## Backlog
 - P1 — Optional: add `@SpringBootTest` integration tests for the new endpoints (`WebhookSubscriptionController`, `AuditRollbackController`, soft-delete) under `valkeyry-config/src/test/java/...`.

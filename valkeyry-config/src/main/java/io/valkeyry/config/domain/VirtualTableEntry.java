@@ -2,6 +2,7 @@ package io.valkeyry.config.domain;
 
 import io.r2dbc.postgresql.codec.Json;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
@@ -18,7 +19,7 @@ import java.util.UUID;
  * tableName, recordKey)} tuple.</p>
  */
 @Table("virtual_table_entry")
-public class VirtualTableEntry {
+public class VirtualTableEntry implements UuidEntity {
 
     @Id
     @Column("id")
@@ -56,10 +57,13 @@ public class VirtualTableEntry {
     @Column("created_by")
     private String createdBy;
 
+    @Transient
+    private boolean isNew = true;
+
     public VirtualTableEntry() {}
 
     // ------------- accessors -------------
-    public UUID getId() { return id; }
+    @Override public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
@@ -79,4 +83,7 @@ public class VirtualTableEntry {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+
+    @Override public boolean isNew() { return isNew; }
+    @Override public void markPersisted() { this.isNew = false; }
 }

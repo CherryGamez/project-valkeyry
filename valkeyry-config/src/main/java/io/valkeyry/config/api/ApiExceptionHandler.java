@@ -4,6 +4,7 @@ import io.valkeyry.config.error.IdempotentDuplicateException;
 import io.valkeyry.config.error.SchemaValidationException;
 import io.valkeyry.config.error.TenantAccessDeniedException;
 import io.valkeyry.config.error.VirtualTableNotFoundException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -64,5 +65,25 @@ public class ApiExceptionHandler {
     public ResponseEntity<ProblemDetail> illegalArg(IllegalArgumentException ex) {
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         return ResponseEntity.badRequest().body(p);
+    }
+
+    /**
+     * Maps any Spring-translated UNIQUE-constraint violation to {@code 409 Conflict} with a
+     * stable Problem+JSON type — typically fired when a tenant tries to register the same
+     * webhook URL twice, or when concurrent ingests of the same record key race past the
+     * idempotency guard at the DB layer.
+     */
+    @ExceptionHandler(DuplicateKeyException.class)
+    public ResponseEntity<ProblemDetail> duplicateKey(DuplicateKeyException ex) {
+        ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
+                "Resource already exists: " + rootCauseMessage(ex));
+        p.setType(URI.create("urn:valkeyry:error:duplicate-resource"));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(p);
+    }
+
+    private static String rootCauseMessage(Throwable t) {
+        Throwable cur = t;
+        while (cur.getCause() != null && cur.getCause() != cur) cur = cur.getCause();
+        return cur.getMessage() == null ? t.getMessage() : cur.getMessage();
     }
 }

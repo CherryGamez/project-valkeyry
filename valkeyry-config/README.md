@@ -53,18 +53,55 @@ Environment variables (most useful):
 
 ## Local run
 
+### Option A — one-command quick start (Docker Compose)
+
 ```bash
-# Bring up Postgres
-docker run -d --rm --name vc-pg -e POSTGRES_DB=valkeyry_config \
-  -e POSTGRES_USER=valkeyry -e POSTGRES_PASSWORD=valkeyry \
-  -p 5432:5432 postgres:16-alpine
-
-# Run the service
-mvn spring-boot:run
-
-# Smoke test
-curl -H "X-API-Key: dev-key" http://localhost:8081/actuator/health
+# Brings up Postgres + the packaged app on http://localhost:8081
+mvn -pl valkeyry-config -am -DskipTests package
+docker compose -f valkeyry-config/docker-compose.dev.yml up
 ```
+
+Open <http://localhost:8081/> in a browser → the HTMX admin GUI loads, click **Connect**
+with `demo-tenant` + `plugin-test-key` and start declaring tables.
+
+### Option B — Postgres in Docker, app from your IDE
+
+```bash
+# 1. Postgres only (one-time)
+docker compose -f valkeyry-config/docker-compose.dev.yml up -d postgres
+```
+
+Then in **IntelliJ IDEA**:
+
+1. Open `ValkeyryConfigApplication` and click ▶ **Run**.
+2. The first run will fail with `Connection to 0.0.0.0:5432 refused` if `localhost`
+   doesn't resolve to `127.0.0.1` on your machine. Edit the run config and add the
+   env vars from `valkeyry-config/.env.dev` (or install the **EnvFile** plugin and
+   point it at that file).
+3. Re-run — Netty starts on `:8081`, Flyway applies V1→V3.
+
+```bash
+# Or from a shell
+cd valkeyry-config
+env $(grep -v '^#' .env.dev | xargs) mvn spring-boot:run
+```
+
+### Smoke test
+
+```bash
+curl -H "X-API-Key: plugin-test-key" \
+     http://localhost:8081/api/v1/tenants/demo-tenant/tables
+# → []
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `Connection to 0.0.0.0:5432 refused` | Postgres isn't running | `docker compose -f valkeyry-config/docker-compose.dev.yml up -d postgres` |
+| `No default constructor found` on a service bean | Stale local build before the wiring fix | `mvn -pl valkeyry-config clean package` |
+| App starts, but `/api/...` returns 401 | Missing `X-API-Key` / wrong tenant | Use `plugin-test-key` against tenant `demo-tenant` (matches `VALKEYRY_API_KEYS`) |
+| Flyway: `schema "valkeyry_config" does not exist` | First-run without the init script | Recreate volume: `docker compose -f valkeyry-config/docker-compose.dev.yml down -v && docker compose -f valkeyry-config/docker-compose.dev.yml up -d postgres` |
 
 ## Storage model
 - `virtual_table_registry` — one row per `(tenant, table)`+version; current row has `is_active=true`.

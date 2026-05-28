@@ -6,8 +6,12 @@ spring:
   application:
     name: valkeyry-config
   # ----- R2DBC (runtime, reactive) -----
+  # NOTE: `?schema=valkeyry_config` instructs r2dbc-postgresql to issue
+  # `SET search_path = valkeyry_config` after connecting, so that every query
+  # finds the tables Flyway created in that schema. Without this, queries fail
+  # with `relation "virtual_table_registry" does not exist`.
   r2dbc:
-    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://0.0.0.0:5432/valkeyry_config}
+    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://0.0.0.0:5432/valkeyry_config?schema=valkeyry_config}
     username: ${VALKEYRY_CONFIG_DB_USER:postgres}
     password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
     pool:
