@@ -7,8 +7,8 @@ spring:
     name: valkeyry-config
   # ----- R2DBC (runtime, reactive) -----
   r2dbc:
-    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://localhost:5432/valkeyry_config}
-    username: ${VALKEYRY_CONFIG_DB_USER:valkeyry}
+    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://0.0.0.0:5432/valkeyry_config}
+    username: ${VALKEYRY_CONFIG_DB_USER:postgres}
     password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
     pool:
       enabled: true
@@ -18,11 +18,16 @@ spring:
   # ----- Flyway (bootstrap, blocking JDBC) -----
   flyway:
     enabled: true
-    url: ${VALKEYRY_CONFIG_JDBC_URL:jdbc:postgresql://localhost:5432/valkeyry_config}
-    user: ${VALKEYRY_CONFIG_DB_USER:valkeyry}
+    url: ${VALKEYRY_CONFIG_JDBC_URL:jdbc:postgresql://0.0.0.0:5432/valkeyry_config}
+    user: ${VALKEYRY_CONFIG_DB_USER:postgres}
     password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
     locations: classpath:db/migration
     baseline-on-migrate: true
+    default-schema: valkeyry_config
+  jpa:
+    properties:
+      hibernate:
+        default_schema: valkeyry_config
   # ----- OIDC resource server (Track 1) -----
   security:
     oauth2:
@@ -68,9 +73,9 @@ management:
 
 logging:
   level:
-    io.valkeyry: INFO
-    org.springframework.r2dbc: INFO
-    org.springframework.security: INFO
+    io.valkeyry: DEBUG
+    org.springframework.r2dbc: DEBUG
+    org.springframework.security: DEBUG
 
 ---
 spring:
