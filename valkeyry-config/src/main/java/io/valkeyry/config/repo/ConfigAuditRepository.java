@@ -4,10 +4,18 @@ import io.valkeyry.config.domain.ConfigAuditEntry;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
 public interface ConfigAuditRepository extends ReactiveCrudRepository<ConfigAuditEntry, UUID> {
+
+    @Query("""
+        SELECT * FROM config_audit_log
+         WHERE tenant_id = :tenantId
+           AND id        = :id
+    """)
+    Mono<ConfigAuditEntry> findByTenantAndId(String tenantId, UUID id);
 
     @Query("""
         SELECT * FROM config_audit_log

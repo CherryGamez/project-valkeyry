@@ -24,7 +24,7 @@ import java.util.UUID;
 @Service
 public class ConfigAuditService {
 
-    public enum Operation { DECLARE_TABLE, REVISE_TABLE, INGEST_RECORD, DEDUP_SKIP }
+    public enum Operation { DECLARE_TABLE, REVISE_TABLE, INGEST_RECORD, DEDUP_SKIP, DELETE_RECORD, ROLLBACK }
 
     private final ConfigAuditRepository repo;
     private final ObjectMapper mapper;

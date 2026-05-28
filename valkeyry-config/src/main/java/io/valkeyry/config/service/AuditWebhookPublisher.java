@@ -3,7 +3,9 @@ package io.valkeyry.config.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelOption;
 import io.valkeyry.config.config.AuditWebhookProperties;
+import io.valkeyry.config.domain.AuditWebhookSubscription;
 import io.valkeyry.config.domain.ConfigAuditEntry;
+import io.valkeyry.config.repo.AuditWebhookSubscriptionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -24,19 +26,16 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Pushes every persisted {@link ConfigAuditEntry} to the configured webhook URLs.
+ * Pushes every persisted {@link ConfigAuditEntry} to all configured webhook URLs.
  *
- * <p>Designed to be SIEM-friendly:</p>
+ * <p>URL sources are <em>merged</em>:</p>
  * <ul>
- *   <li>One {@code POST application/json} per URL per event (no batching → SIEM can react in real time).</li>
- *   <li>Body is the full audit row (before + after values included).</li>
- *   <li>{@code X-Valkeyry-Signature: sha256=&lt;hex&gt;} HMAC-SHA256 of the raw body using the configured
- *       shared secret — the SIEM verifies and rejects any tampered or replayed payload.</li>
- *   <li>{@code X-Valkeyry-Event}, {@code X-Valkeyry-Tenant}, {@code X-Valkeyry-Request-Id} for routing.</li>
- *   <li>Retries with exponential backoff on transient failures (5xx, IO). 4xx fails fast.</li>
- *   <li><strong>Never</strong> propagates errors — the original audit write must not be undone if SIEM
- *       is down. Failed deliveries log {@code WARN} for operators to alert on.</li>
+ *   <li>Static, env-driven URLs from {@link AuditWebhookProperties} apply to every tenant.</li>
+ *   <li>Dynamic {@link AuditWebhookSubscription} rows are scoped to the audit event's tenant.</li>
  * </ul>
+ *
+ * <p>SIEM-friendly: one {@code POST application/json} per URL per event, HMAC-SHA256 signature,
+ * exponential backoff on 5xx/IO; 4xx fails fast; webhook failure never undoes the audit insert.</p>
  */
 @Component
 @Configuration
@@ -50,11 +49,15 @@ public class AuditWebhookPublisher {
     private static final String REQID_HEADER = "X-Valkeyry-Request-Id";
 
     private final AuditWebhookProperties props;
+    private final AuditWebhookSubscriptionRepository subscriptions;
     private final ObjectMapper mapper;
     private final WebClient webClient;
 
-    public AuditWebhookPublisher(AuditWebhookProperties props, ObjectMapper mapper) {
+    public AuditWebhookPublisher(AuditWebhookProperties props,
+                                 AuditWebhookSubscriptionRepository subscriptions,
+                                 ObjectMapper mapper) {
         this.props = props;
+        this.subscriptions = subscriptions;
         this.mapper = mapper;
         HttpClient hc = HttpClient.create()
                 .responseTimeout(Duration.ofMillis(props.getTimeoutMs()))
@@ -65,26 +68,54 @@ public class AuditWebhookPublisher {
     }
 
     /**
-     * Fan-out an audit event to all configured URLs.
-     * Returns {@link Mono#empty()} when disabled or no URLs.
+     * Test-friendly constructor — runs without the DB-backed subscription source. Equivalent to
+     * the production wiring when no dynamic subscriptions table exists yet. Production code always
+     * receives the 3-arg constructor via Spring DI.
      */
+    public AuditWebhookPublisher(AuditWebhookProperties props, ObjectMapper mapper) {
+        this(props, null, mapper);
+    }
+
+    /** Fan-out an audit event to every configured target (static + per-tenant dynamic). */
     public Mono<Void> publish(ConfigAuditEntry entry) {
-        if (!props.isEnabled() || props.getUrls().isEmpty()) return Mono.empty();
-        String body;
+        final String body;
         try { body = mapper.writeValueAsString(toPayload(entry)); }
         catch (Exception ex) {
             log.warn("audit-webhook: failed to serialise event {} — {}", entry.getId(), ex.getMessage());
             return Mono.empty();
         }
-        String signature = signature(body);
-        return Flux.fromIterable(props.getUrls())
-                .flatMap(url -> deliver(url, body, signature, entry))
+        return resolveTargets(entry.getTenantId())
+                .flatMap(target -> deliver(target, body, entry))
                 .then();
     }
 
-    private Mono<Void> deliver(String url, String body, String signature, ConfigAuditEntry entry) {
+    /**
+     * Build the merged target list: static URLs (global, gated by {@code enabled})
+     * + DB subscriptions (tenant-scoped, always honoured when {@code enabled = true} per row).
+     */
+    private Flux<Target> resolveTargets(String tenantId) {
+        Flux<Target> staticTargets = props.isEnabled()
+                ? Flux.fromIterable(props.getUrls())
+                        .filter(u -> u != null && !u.isBlank())
+                        .map(u -> new Target(u, props.getSecret()))
+                : Flux.empty();
+        Flux<Target> dynamicTargets = (subscriptions == null)
+                ? Flux.empty()
+                : subscriptions.findEnabledByTenant(tenantId == null ? "" : tenantId)
+                    .map(s -> new Target(s.getUrl(),
+                            (s.getSecret() != null && !s.getSecret().isBlank()) ? s.getSecret() : props.getSecret()))
+                    .onErrorResume(ex -> {
+                        log.warn("audit-webhook: failed to read dynamic subscriptions for {} — {}", tenantId, ex.toString());
+                        return Flux.empty();
+                    });
+        // Dedup by URL: dynamic wins (so per-tenant secrets override the global one if duplicated).
+        return Flux.concat(dynamicTargets, staticTargets).distinct(Target::url);
+    }
+
+    private Mono<Void> deliver(Target target, String body, ConfigAuditEntry entry) {
+        String signature = signature(body, target.secret());
         return webClient.post()
-                .uri(url)
+                .uri(target.url())
                 .contentType(MediaType.APPLICATION_JSON)
                 .header(SIG_HEADER, signature)
                 .header(EVENT_HEADER, "config.audit")
@@ -96,7 +127,7 @@ public class AuditWebhookPublisher {
                 .retryWhen(Retry.backoff(props.getMaxRetries(), Duration.ofMillis(props.getInitialBackoffMs()))
                         .filter(this::isRetryable))
                 .doOnError(ex -> log.warn("audit-webhook: failed delivery to {} for event {} — {}",
-                        url, entry.getId(), ex.toString()))
+                        target.url(), entry.getId(), ex.toString()))
                 .onErrorResume(ex -> Mono.empty())
                 .then();
     }
@@ -109,12 +140,12 @@ public class AuditWebhookPublisher {
         return true;
     }
 
-    /** Computes {@code sha256=&lt;lowercase-hex&gt;}. Falls back to empty if no secret. */
-    private String signature(String body) {
-        if (props.getSecret().isBlank()) return "sha256=unsigned";
+    /** Computes {@code sha256=&lt;lowercase-hex&gt;}. Falls back to {@code sha256=unsigned} when no secret. */
+    private String signature(String body, String secret) {
+        if (secret == null || secret.isBlank()) return "sha256=unsigned";
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(props.getSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             byte[] digest = mac.doFinal(body.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder(digest.length * 2);
             for (byte b : digest) sb.append(String.format("%02x", b));
@@ -125,10 +156,7 @@ public class AuditWebhookPublisher {
         }
     }
 
-    /**
-     * Builds the JSON payload — fields ordered to match the audit ledger model so SIEM
-     * parsers can use a single schema. We embed the raw before/after JSON unparsed.
-     */
+    /** SIEM-shaped payload. */
     private Map<String, Object> toPayload(ConfigAuditEntry e) {
         Map<String, Object> out = new HashMap<>();
         out.put("id", e.getId().toString());
@@ -150,4 +178,7 @@ public class AuditWebhookPublisher {
         try { return mapper.readTree(json); }
         catch (Exception ex) { return json; }
     }
+
+    /** Tuple of url + the secret used to sign the body for that url. */
+    private record Target(String url, String secret) {}
 }

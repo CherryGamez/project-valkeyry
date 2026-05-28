@@ -120,6 +120,19 @@ public class VirtualTableController {
         return guard.check(auth, tenantId).then(service.getLatest(tenantId, tableName, recordKey));
     }
 
+    @DeleteMapping("/tables/{name}/entries/{recordKey}")
+    public Mono<ResponseEntity<Void>> deleteEntry(@PathVariable String tenantId,
+                                                  @PathVariable("name") String tableName,
+                                                  @PathVariable String recordKey,
+                                                  Authentication auth,
+                                                  ServerWebExchange exchange) {
+        String track = AuthTrack.of(auth).name();
+        String requestId = exchange.getRequest().getId();
+        return guard.check(auth, tenantId)
+                .then(service.softDelete(tenantId, tableName, recordKey, auth.getName(), track, requestId))
+                .then(Mono.just(ResponseEntity.noContent().<Void>build()));
+    }
+
     @GetMapping("/tables/{name}/entries/{recordKey}/history")
     public Flux<EntryView> history(@PathVariable String tenantId,
                                    @PathVariable("name") String tableName,

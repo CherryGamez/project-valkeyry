@@ -1,11 +1,915 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="utf-8"/>
-    <meta http-equiv="refresh" content="0; url=/audit/"/>
-    <title>Valkeyry · redirecting…</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Valkeyry · Config Registry Admin</title>
+
+    <!-- HTMX 1.9.10 + Mustache (we do client-side templating manually for full control) -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/mustache@4.2.0/mustache.min.js"></script>
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              ink:     { 50:'#F1F5F9', 100:'#CBD5E1', 200:'#94A3B8', 300:'#64748B' },
+              surface: { 900:'#0F172A', 800:'#1E293B', 700:'#334155', 950:'#0B1220' },
+              brand:   { DEFAULT:'#10B981', soft:'#064E3B', ink:'#6EE7B7' },
+              accent:  { rose:'#F43F5E', amber:'#F59E0B', blue:'#3B82F6', indigo:'#6366F1' }
+            },
+            fontFamily: {
+              sans: ['"Inter"','"SF Pro Display"','-apple-system','BlinkMacSystemFont','system-ui','sans-serif'],
+              mono: ['"JetBrains Mono"','"SF Mono"','ui-monospace','Menlo','monospace']
+            },
+            boxShadow: {
+              card: '0 1px 2px rgba(2,6,23,0.40), 0 6px 18px rgba(2,6,23,0.30)',
+              lift: '0 8px 24px rgba(16,185,129,0.18)'
+            },
+            borderRadius: { card:'14px' }
+          }
+        }
+      };
+    </script>
+
+    <style>
+      html, body { background:#0F172A; color:#F1F5F9; min-height:100%; font-family:"Inter","SF Pro Display",-apple-system,system-ui,sans-serif; letter-spacing:-0.011em; }
+      ::selection { background:#10B981; color:#0F172A; }
+      .scrollbar::-webkit-scrollbar { width:8px; height:8px; }
+      .scrollbar::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
+      .scrollbar::-webkit-scrollbar-thumb:hover { background:#475569; }
+
+      /* HTMX request indicators */
+      .htmx-request .spinner { opacity:1 !important; }
+      .htmx-indicator { opacity:0; transition: opacity 200ms ease; }
+      .htmx-request .htmx-indicator { opacity:1; }
+      .htmx-request.htmx-indicator { opacity:1; }
+
+      /* Micro-interactions */
+      .lift { transition: transform 180ms cubic-bezier(.34,1.56,.64,1), box-shadow 180ms ease, border-color 180ms ease; }
+      .lift:hover { transform: translateY(-1px); border-color:#10B981; }
+      .press { transition: transform 120ms ease, background-color 120ms ease, opacity 120ms ease; }
+      .press:active { transform: scale(.97); }
+
+      /* Sidebar item */
+      .nav-item.active { background:#10B981; color:#0F172A; }
+      .nav-item.active .nav-meta { color:#064E3B; }
+
+      /* Audit timeline rail */
+      .timeline { position:relative; padding-left:28px; }
+      .timeline::before { content:''; position:absolute; left:11px; top:0; bottom:0; width:2px; background:#334155; }
+      .timeline-dot { position:absolute; left:-22px; top:14px; width:14px; height:14px; border-radius:50%; border:3px solid #0F172A; box-shadow: 0 0 0 1px #334155; }
+
+      /* Op badges */
+      .op-badge { padding:3px 9px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:.01em; white-space:nowrap; }
+      .op-DECLARE_TABLE { background:#1E3A8A; color:#93C5FD; }
+      .op-REVISE_TABLE  { background:#78350F; color:#FCD34D; }
+      .op-INGEST_RECORD { background:#064E3B; color:#6EE7B7; }
+      .op-DEDUP_SKIP    { background:#334155; color:#CBD5E1; }
+      .op-DELETE_RECORD { background:#7F1D1D; color:#FCA5A5; }
+      .op-ROLLBACK      { background:#312E81; color:#A5B4FC; }
+
+      /* JSON pretty box */
+      .json-box { background:#0B1220; border:1px solid #334155; border-radius:10px; padding:10px 12px; font-family:"JetBrains Mono","SF Mono",ui-monospace,Menlo,monospace; font-size:12px; line-height:1.55; color:#CBD5E1; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; }
+
+      /* Connection pulse */
+      .pulse-dot { width:8px; height:8px; border-radius:50%; }
+      .pulse-online { background:#10B981; box-shadow: 0 0 0 0 rgba(16,185,129,.7); animation: pulse 2s infinite; }
+      @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(16,185,129,.45);} 70%{box-shadow:0 0 0 10px rgba(16,185,129,0);} 100%{box-shadow:0 0 0 0 rgba(16,185,129,0);} }
+      .pulse-off { background:#475569; }
+
+      /* Toast */
+      #toast-stack { position:fixed; bottom:24px; right:24px; z-index:50; display:grid; gap:10px; }
+      .toast { background:#1E293B; border-left:3px solid #10B981; padding:12px 18px; border-radius:10px; box-shadow:0 8px 24px rgba(2,6,23,.5); min-width:280px; animation: slideIn 200ms ease; }
+      .toast.error { border-left-color:#F43F5E; }
+      @keyframes slideIn { from { transform: translateX(20px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+
+      /* Tab nav */
+      .tab-btn { padding:10px 16px; font-size:14px; font-weight:500; color:#94A3B8; border-bottom:2px solid transparent; transition: color 120ms, border-color 120ms; }
+      .tab-btn.active { color:#10B981; border-bottom-color:#10B981; }
+      .tab-btn:hover:not(.active) { color:#CBD5E1; }
+    </style>
 </head>
-<body style="background:#0b1220;color:#94a3b8;font-family:system-ui,sans-serif;padding:2rem;">
-    Redirecting to <a style="color:#22d3ee" href="/audit/">/audit/</a>…
+
+<body>
+
+<!-- ============================== TOP BAR ============================== -->
+<header class="border-b border-surface-700/70 bg-surface-900/95 backdrop-blur sticky top-0 z-20">
+    <div class="max-w-[1480px] mx-auto px-6 py-3.5 flex items-center gap-6">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-card bg-gradient-to-br from-brand to-teal-500 flex items-center justify-center shadow-card">
+                <span class="text-surface-900 font-bold text-sm">V</span>
+            </div>
+            <div>
+                <div class="text-[15px] font-semibold tracking-tight">Valkeyry</div>
+                <div class="text-[11px] text-ink-300 -mt-0.5">Config Registry Admin</div>
+            </div>
+        </div>
+
+        <!-- Tenant + Auth control -->
+        <div data-testid="auth-bar" class="ml-auto flex items-center gap-3 bg-surface-800 px-3 py-2 rounded-card border border-surface-700">
+            <div class="flex items-center gap-2 text-[12px] text-ink-200">
+                <span id="conn-dot" class="pulse-dot pulse-off"></span>
+                <span id="conn-text" class="font-mono">disconnected</span>
+            </div>
+            <button id="open-auth-btn" data-testid="open-auth-btn"
+                    onclick="document.getElementById('auth-modal').showModal()"
+                    class="press text-[13px] px-3 py-1.5 bg-brand text-surface-900 rounded-md font-semibold hover:bg-emerald-400">
+                Connect
+            </button>
+        </div>
+    </div>
+
+    <!-- Tab nav -->
+    <div class="max-w-[1480px] mx-auto px-6 flex items-center gap-1">
+        <button class="tab-btn active" data-tab="tables" data-testid="tab-tables" onclick="switchTab('tables')">Virtual Tables</button>
+        <button class="tab-btn" data-tab="audit"   data-testid="tab-audit"   onclick="switchTab('audit')">Audit Timeline</button>
+        <button class="tab-btn" data-tab="webhooks" data-testid="tab-webhooks" onclick="switchTab('webhooks')">Webhooks</button>
+        <div class="ml-auto flex items-center gap-3 py-2 text-[11px] text-ink-300 font-mono">
+            <span class="htmx-indicator inline-flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> syncing…
+            </span>
+        </div>
+    </div>
+</header>
+
+<!-- ============================== AUTH MODAL ============================== -->
+<dialog id="auth-modal" class="bg-transparent text-ink-50 backdrop:bg-surface-900/80 backdrop:backdrop-blur-sm">
+    <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-6 w-[440px] shadow-card" data-testid="auth-modal">
+        <h2 class="text-[17px] font-semibold mb-1">Connect to a tenant</h2>
+        <p class="text-[12px] text-ink-300 mb-5">Credentials are stored in this browser only. Used in <span class="font-mono">X-API-Key</span> / <span class="font-mono">Authorization</span> headers.</p>
+        <form id="auth-form" onsubmit="event.preventDefault(); saveConn();" class="grid gap-4">
+            <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Tenant ID</span>
+                <input id="auth-tenant" data-testid="auth-tenant-input" placeholder="demo-tenant" required
+                       class="bg-surface-950 rounded-md px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+            </label>
+            <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Auth mode</span>
+                <select id="auth-mode" data-testid="auth-mode-select"
+                        class="bg-surface-950 rounded-md px-3 py-2 text-[14px] focus:outline-none focus:ring-2 focus:ring-brand/40">
+                    <option value="apikey">API Key (X-API-Key)</option>
+                    <option value="bearer">OIDC Bearer (Authorization)</option>
+                </select>
+            </label>
+            <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Token / Key</span>
+                <input id="auth-token" data-testid="auth-token-input" type="password" placeholder="plugin-test-key"
+                       class="bg-surface-950 rounded-md px-3 py-2 font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+            </label>
+            <div class="flex items-center justify-end gap-2 mt-1">
+                <button type="button" onclick="document.getElementById('auth-modal').close()"
+                        class="press px-4 py-2 text-[13px] text-ink-200 hover:text-ink-50">Cancel</button>
+                <button type="submit" data-testid="auth-save-btn"
+                        class="press px-4 py-2 text-[13px] bg-brand text-surface-900 rounded-md font-semibold hover:bg-emerald-400">Save &amp; Connect</button>
+            </div>
+        </form>
+    </div>
+</dialog>
+
+<!-- ============================== MAIN LAYOUT ============================== -->
+<main class="max-w-[1480px] mx-auto px-6 py-6 grid grid-cols-[280px_1fr] gap-6">
+
+    <!-- ===================== SIDEBAR (Tables nav) ===================== -->
+    <aside class="bg-surface-800/60 border border-surface-700 rounded-card-lg p-3 self-start sticky top-[112px]" data-testid="sidebar">
+        <div class="flex items-center justify-between px-2 pb-2.5 border-b border-surface-700">
+            <div class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Virtual Tables</div>
+            <button id="refresh-sidebar-btn" data-testid="refresh-sidebar-btn"
+                    onclick="refreshSidebar()"
+                    title="Refresh tables"
+                    class="press text-ink-300 hover:text-brand text-sm">↻</button>
+        </div>
+
+        <!-- The table list — re-fetched after every successful create/select via htmx.ajax() -->
+        <div id="sidebar-list" data-testid="sidebar-list" class="pt-2.5 grid gap-1 max-h-[60vh] overflow-auto scrollbar"
+             data-template="sidebar-tpl">
+            <div class="text-[12px] text-ink-300 italic px-2 py-3" data-testid="sidebar-empty">Connect to a tenant to load tables.</div>
+        </div>
+
+        <button onclick="document.getElementById('create-table-modal').showModal()"
+                data-testid="open-create-table-btn"
+                class="press mt-3 w-full text-[13px] font-semibold px-3 py-2 bg-brand text-surface-900 rounded-md hover:bg-emerald-400 shadow-card disabled:opacity-50"
+                id="create-table-trigger" disabled>
+            + Declare new table
+        </button>
+    </aside>
+
+    <!-- ===================== CONTENT AREA ===================== -->
+    <section class="min-w-0">
+
+        <!-- ============== TAB: TABLES ============== -->
+        <div id="tab-tables" class="tab-pane" data-testid="tab-pane-tables">
+            <div id="tables-content" data-testid="tables-content">
+                <!-- Default empty-state when no table selected -->
+                <div class="bg-surface-800/40 border border-dashed border-surface-700 rounded-card-lg p-10 text-center">
+                    <div class="w-12 h-12 mx-auto rounded-full bg-surface-800 flex items-center justify-center mb-3 text-2xl">⌗</div>
+                    <div class="text-[15px] font-medium">Pick a virtual table from the sidebar</div>
+                    <div class="text-[13px] text-ink-300 mt-1">Or <button class="text-brand underline" onclick="document.getElementById('create-table-modal').showModal()" id="empty-create-link">declare a new one</button> to get started.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============== TAB: AUDIT ============== -->
+        <div id="tab-audit" class="tab-pane hidden" data-testid="tab-pane-audit">
+            <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-5 mb-5">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-[16px] font-semibold">Audit Timeline</h2>
+                    <button id="refresh-audit-btn" data-testid="refresh-audit-btn"
+                            onclick="loadAudit()"
+                            class="press text-[13px] px-3 py-1.5 bg-surface-700 text-ink-50 rounded-md hover:bg-surface-700/70">
+                        ↻ Refresh
+                    </button>
+                </div>
+                <p class="text-[12px] text-ink-300">Append-only ledger of every config change. Click <span class="op-badge op-ROLLBACK">Rollback</span> on any record-level entry to restore its prior state as a new version.</p>
+            </div>
+            <div id="audit-content" data-testid="audit-content"
+                 data-template="audit-tpl">
+                <div class="text-[13px] text-ink-300 italic px-2 py-3">Connect to a tenant and press Refresh to load audit history.</div>
+            </div>
+        </div>
+
+        <!-- ============== TAB: WEBHOOKS ============== -->
+        <div id="tab-webhooks" class="tab-pane hidden" data-testid="tab-pane-webhooks">
+            <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-5 mb-5">
+                <h2 class="text-[16px] font-semibold mb-1">Audit Webhook Targets</h2>
+                <p class="text-[12px] text-ink-300 mb-4">Every persisted audit event is fanned-out to all enabled URLs with HMAC-SHA256 signature in <span class="font-mono">X-Valkeyry-Signature</span>. Per-row secrets override the global one.</p>
+
+                <form id="webhook-form" onsubmit="event.preventDefault(); createWebhook();"
+                      class="grid grid-cols-[1fr_1fr_180px_auto] gap-3 items-end" data-testid="webhook-form">
+                    <label class="grid gap-1.5">
+                        <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Webhook URL</span>
+                        <input id="wh-url" required placeholder="https://siem.example.com/valkeyry"
+                               data-testid="webhook-url-input"
+                               class="bg-surface-950 rounded-md px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                    </label>
+                    <label class="grid gap-1.5">
+                        <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Description</span>
+                        <input id="wh-desc" placeholder="Splunk prod" data-testid="webhook-desc-input"
+                               class="bg-surface-950 rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                    </label>
+                    <label class="grid gap-1.5">
+                        <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Override secret</span>
+                        <input id="wh-secret" type="password" placeholder="(optional)" data-testid="webhook-secret-input"
+                               class="bg-surface-950 rounded-md px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+                    </label>
+                    <button type="submit" data-testid="webhook-add-btn"
+                            class="press px-4 py-2 bg-brand text-surface-900 rounded-md font-semibold text-[13px] hover:bg-emerald-400">Add</button>
+                </form>
+            </div>
+
+            <div id="webhook-content" data-testid="webhook-content"
+                 data-template="webhook-tpl">
+                <div class="text-[13px] text-ink-300 italic px-2 py-3">Connect to a tenant to load webhook subscriptions.</div>
+            </div>
+        </div>
+
+    </section>
+</main>
+
+<!-- ============================== CREATE TABLE MODAL ============================== -->
+<dialog id="create-table-modal" class="bg-transparent text-ink-50 backdrop:bg-surface-900/80 backdrop:backdrop-blur-sm">
+    <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-6 w-[640px] shadow-card" data-testid="create-table-modal">
+        <h2 class="text-[17px] font-semibold mb-1">Declare a virtual table</h2>
+        <p class="text-[12px] text-ink-300 mb-5">Provide a name and a Draft 2020-12 JSON Schema. The registry will validate every future entry against it.</p>
+        <form id="create-table-form" onsubmit="event.preventDefault(); declareTable();" class="grid gap-4">
+            <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Table Name</span>
+                <input id="ct-name" required pattern="^[a-zA-Z0-9_\-]+$" data-testid="ct-name-input"
+                       placeholder="customers"
+                       class="bg-surface-950 rounded-md px-3 py-2 text-[14px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+            </label>
+            <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">JSON Schema</span>
+                <textarea id="ct-schema" rows="14" required data-testid="ct-schema-input"
+                          class="bg-surface-950 rounded-md px-3 py-2 text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40">{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["email"],
+  "properties": {
+    "email":      { "type": "string", "format": "email" },
+    "fullName":   { "type": "string" },
+    "active":     { "type": "boolean" }
+  },
+  "additionalProperties": false
+}</textarea>
+            </label>
+            <div id="ct-error" data-testid="ct-error" class="hidden"></div>
+            <div class="flex items-center justify-end gap-2 mt-1">
+                <button type="button" onclick="document.getElementById('create-table-modal').close()"
+                        class="press px-4 py-2 text-[13px] text-ink-200 hover:text-ink-50">Cancel</button>
+                <button type="submit" data-testid="ct-submit-btn"
+                        class="press px-4 py-2 text-[13px] bg-brand text-surface-900 rounded-md font-semibold hover:bg-emerald-400">Declare</button>
+            </div>
+        </form>
+    </div>
+</dialog>
+
+<!-- ============================== TOAST STACK ============================== -->
+<div id="toast-stack" data-testid="toast-stack"></div>
+
+<!-- ============================== MUSTACHE TEMPLATES ============================== -->
+
+<!-- Sidebar list -->
+<template id="sidebar-tpl">
+{{#hasRows}}
+{{#rows}}
+<button onclick="selectTable('{{tableName}}')" data-testid="sidebar-item-{{tableName}}"
+        class="nav-item lift text-left px-3 py-2 rounded-md border border-transparent hover:bg-surface-700/40 grid gap-0.5">
+    <span class="text-[13px] font-medium truncate">{{tableName}}</span>
+    <span class="nav-meta text-[11px] font-mono text-ink-300">v{{configVersion}}</span>
+</button>
+{{/rows}}
+{{/hasRows}}
+{{^hasRows}}
+<div class="text-[12px] text-ink-300 italic px-2 py-3" data-testid="sidebar-empty-after">No tables yet. Declare one to begin.</div>
+{{/hasRows}}
+</template>
+
+<!-- Audit list -->
+<template id="audit-tpl">
+{{#hasRows}}
+<ul class="timeline grid gap-3" data-testid="audit-list">
+{{#rows}}
+<li class="bg-surface-800/60 border border-surface-700 rounded-card-lg p-4 lift" data-testid="audit-row-{{id}}">
+    <span class="timeline-dot op-{{operation}}"></span>
+    <div class="flex items-center gap-3 flex-wrap mb-2">
+        <span class="op-badge op-{{operation}}" data-testid="audit-op-{{id}}">{{operation}}</span>
+        <span class="text-[13px] font-medium">{{tableName}}{{#recordKey}} · <span class="text-brand">{{recordKey}}</span>{{/recordKey}}</span>
+        <span class="ml-auto text-[11px] text-ink-300 font-mono">{{changedAt}}</span>
+    </div>
+    <div class="text-[11px] text-ink-300 font-mono mb-2">
+        actor: <span class="text-ink-100">{{actor}}</span> · track: {{actorTrack}} · req: {{requestId}}
+    </div>
+    <details class="mt-2">
+        <summary class="text-[12px] text-ink-200 cursor-pointer select-none">View before / after JSON</summary>
+        <div class="grid md:grid-cols-2 gap-3 mt-2">
+            <div>
+                <div class="text-[10px] uppercase tracking-wider font-semibold text-accent-rose mb-1">Before</div>
+                <pre class="json-box">{{beforeJson}}</pre>
+            </div>
+            <div>
+                <div class="text-[10px] uppercase tracking-wider font-semibold text-brand mb-1">After</div>
+                <pre class="json-box">{{afterJson}}</pre>
+            </div>
+        </div>
+    </details>
+    {{#canRollback}}
+    <div class="mt-3 flex justify-end">
+        <button onclick="rollbackAudit('{{id}}')" data-testid="rollback-btn-{{id}}"
+                class="press text-[12px] px-3 py-1.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/40 rounded-md hover:bg-indigo-500/20 font-semibold">
+            ⤺ Push-button rollback
+        </button>
+    </div>
+    {{/canRollback}}
+</li>
+{{/rows}}
+</ul>
+{{/hasRows}}
+{{^hasRows}}
+<div class="text-[13px] text-ink-300 italic px-2 py-3" data-testid="audit-empty">No audit events yet for this tenant.</div>
+{{/hasRows}}
+</template>
+
+<!-- Webhook list — root is an array -->
+<template id="webhook-tpl">
+{{#hasRows}}
+<ul class="grid gap-2" data-testid="webhook-list">
+{{#rows}}
+<li class="bg-surface-800 border border-surface-700 rounded-card p-3 flex items-center gap-4" data-testid="webhook-row-{{id}}">
+    <div class="grid gap-0.5 min-w-0 flex-1">
+        <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-mono text-[13px] truncate">{{url}}</span>
+            {{#enabled}}<span class="op-badge op-INGEST_RECORD">enabled</span>{{/enabled}}
+            {{^enabled}}<span class="op-badge op-DEDUP_SKIP">disabled</span>{{/enabled}}
+            {{#hasSecret}}<span class="op-badge op-REVISE_TABLE">override secret</span>{{/hasSecret}}
+        </div>
+        <div class="text-[11px] text-ink-300 font-mono">
+            {{#description}}{{description}} · {{/description}}created {{createdAt}} by {{createdBy}}
+        </div>
+    </div>
+    <button onclick="removeWebhook('{{id}}')" data-testid="webhook-remove-{{id}}"
+            class="press text-[12px] px-3 py-1.5 bg-accent-rose/10 text-accent-rose border border-accent-rose/40 rounded-md hover:bg-accent-rose/20 font-semibold">
+        Remove
+    </button>
+</li>
+{{/rows}}
+</ul>
+{{/hasRows}}
+{{^hasRows}}
+<div class="text-[13px] text-ink-300 italic px-2 py-3" data-testid="webhook-empty">No dynamic webhooks configured for this tenant.</div>
+{{/hasRows}}
+</template>
+
+<!-- Entries grid template — root is an array -->
+<template id="entries-tpl">
+{{#hasRows}}
+<ul class="grid gap-2" data-testid="entries-list">
+{{#rows}}
+<li class="bg-surface-800 border border-surface-700 rounded-card p-3 grid gap-2" data-testid="entry-row-{{recordKey}}">
+    <div class="flex items-center gap-3 flex-wrap">
+        <span class="font-mono text-[13px] text-brand">{{recordKey}}</span>
+        <span class="op-badge op-DEDUP_SKIP">v{{version}}</span>
+        <span class="text-[11px] text-ink-300 font-mono ml-auto">{{createdAt}} · {{createdBy}}</span>
+    </div>
+    <details>
+        <summary class="text-[12px] text-ink-200 cursor-pointer select-none">View JSON</summary>
+        <pre class="json-box mt-2">{{dataJson}}</pre>
+    </details>
+    <div class="flex items-center gap-2 justify-end">
+        <button onclick="editEntry('{{recordKey}}', this)" data-rk-data="{{dataJson}}" data-testid="entry-edit-{{recordKey}}"
+                class="press text-[12px] px-3 py-1.5 bg-surface-700 text-ink-50 rounded-md hover:bg-surface-700/70">Edit</button>
+        <button onclick="deleteEntry('{{recordKey}}')" data-testid="entry-delete-{{recordKey}}"
+                class="press text-[12px] px-3 py-1.5 bg-accent-rose/10 text-accent-rose border border-accent-rose/40 rounded-md hover:bg-accent-rose/20 font-semibold">
+            Delete
+        </button>
+    </div>
+</li>
+{{/rows}}
+</ul>
+{{/hasRows}}
+{{^hasRows}}
+<div class="text-[13px] text-ink-300 italic px-2 py-3" data-testid="entries-empty">No entries yet. Use the form above to add one.</div>
+{{/hasRows}}
+</template>
+
+<!-- ============================== APPLICATION JAVASCRIPT ============================== -->
+<script>
+// ============== Connection state (localStorage-backed) ==============
+const LS_KEYS = { tenant:'vk.tenant', mode:'vk.auth.mode', token:'vk.auth.token' };
+function getConn() {
+    return {
+        tenantId: localStorage.getItem(LS_KEYS.tenant) || '',
+        mode:     localStorage.getItem(LS_KEYS.mode)   || 'apikey',
+        token:    localStorage.getItem(LS_KEYS.token)  || ''
+    };
+}
+function setConn({ tenantId, mode, token }) {
+    localStorage.setItem(LS_KEYS.tenant, tenantId || '');
+    localStorage.setItem(LS_KEYS.mode,   mode   || 'apikey');
+    localStorage.setItem(LS_KEYS.token,  token  || '');
+}
+function hasConn() {
+    const c = getConn();
+    return !!(c.tenantId && c.token);
+}
+
+// ============== HTMX global request configuration ==============
+// Auth headers + dynamic URL templating for hx-get/hx-post with `[tenantId]` placeholders.
+document.body.addEventListener('htmx:configRequest', (evt) => {
+    const c = getConn();
+    if (c.token) {
+        if (c.mode === 'bearer') evt.detail.headers['Authorization'] = 'Bearer ' + c.token;
+        else                     evt.detail.headers['X-API-Key']      = c.token;
+    }
+    evt.detail.headers['Accept'] = 'application/json';
+});
+
+// ============== HTMX response interception (manual Mustache rendering + 4xx/5xx) ==============
+// Strategy: every container with `data-template="<tpl-id>"` gets its own render here.
+// We listen on `htmx:beforeSwap`, parse the JSON response, shape it for Mustache, render the
+// matching <template> by id, and inject as innerHTML. Default swap is suppressed via hx-swap="none".
+document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    const xhr = evt.detail.xhr;
+    const target = evt.detail.target;
+    if (!xhr) return;
+
+    // Error path — surface non-2xx as inline alerts / toasts, never as raw response text.
+    if (xhr.status >= 400) {
+        evt.detail.shouldSwap = false;
+        handleErrorResponse(xhr);
+        return;
+    }
+
+    // Success path — only act on targets that opted-in via `data-template`.
+    if (!target || !target.getAttribute) return;
+    const tplId = target.getAttribute('data-template');
+    if (!tplId) return;
+
+    const tpl = document.getElementById(tplId);
+    if (!tpl) { console.warn('[valkeyry] missing template:', tplId); return; }
+
+    let raw;
+    try { raw = xhr.responseText ? JSON.parse(xhr.responseText) : null; }
+    catch (e) { console.warn('[valkeyry] failed to parse response:', e); raw = null; }
+
+    const shaped = shapeForTemplate(target.id, raw);
+    target.innerHTML = Mustache.render(tpl.innerHTML, shaped);
+
+    // Process newly-injected HTMX attributes (none today, but keeps the door open).
+    htmx.process(target);
+});
+
+document.body.addEventListener('htmx:responseError', (evt) => {
+    handleErrorResponse(evt.detail.xhr);
+});
+
+function handleErrorResponse(xhr) {
+    if (!xhr) { toast('Network error', true); return; }
+    let body = null;
+    try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+
+    // SchemaValidationException → 422 with `violations` array
+    if (xhr.status === 422 && body && body.violations) {
+        renderSchemaErrors(body);
+        return;
+    }
+    // Bad-request (validation) → fields map
+    if (xhr.status === 400 && body && body.fields) {
+        renderValidationErrors(body);
+        return;
+    }
+    const msg = (body && (body.detail || body.title)) || `${xhr.status} ${xhr.statusText || 'Error'}`;
+    toast(msg, true);
+}
+
+/**
+ * Reshape the raw JSON response into Mustache-friendly view-models.
+ * Each target id has its own shape — keeps logic out of the templates.
+ */
+function shapeForTemplate(targetId, raw) {
+    // Sidebar: response is an array → Mustache uses `{{#.}}…{{/.}}`, but Mustache lacks
+    // implicit-array iteration for unnamed lists in some scenarios — so we wrap explicitly.
+    if (targetId === 'sidebar-list') {
+        const rows = Array.isArray(raw) ? raw : [];
+        return { rows, hasRows: rows.length > 0 };
+    }
+    if (targetId === 'audit-content') {
+        const rows = Array.isArray(raw) ? raw.map(r => ({
+            ...r,
+            beforeJson: prettyJson(r.beforeValue),
+            afterJson:  prettyJson(r.afterValue),
+            canRollback: isRollbackable(r),
+            changedAt:   humanTs(r.changedAt)
+        })) : [];
+        return { rows, hasRows: rows.length > 0 };
+    }
+    if (targetId === 'webhook-content') {
+        const rows = Array.isArray(raw) ? raw.map(r => ({
+            ...r,
+            createdAt: humanTs(r.createdAt)
+        })) : [];
+        return { rows, hasRows: rows.length > 0 };
+    }
+    if (targetId && targetId.startsWith('entries-grid-')) {
+        const rows = Array.isArray(raw) ? raw.map(r => ({
+            ...r,
+            createdAt: humanTs(r.createdAt),
+            dataJson:  prettyJson(r.data)
+        })) : [];
+        return { rows, hasRows: rows.length > 0 };
+    }
+    // Fallback: raw is already the view-model.
+    return raw || {};
+}
+
+function prettyJson(v) {
+    if (v === null || v === undefined) return '— (none)';
+    try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+function humanTs(s) {
+    if (!s) return '—';
+    try { return new Date(s).toLocaleString(); } catch { return s; }
+}
+function isRollbackable(r) {
+    if (!r) return false;
+    if (!r.recordKey) return false;
+    // Only record-level ops with a non-null beforeValue.
+    if (!['INGEST_RECORD','DELETE_RECORD','ROLLBACK'].includes(r.operation)) return false;
+    return r.beforeValue !== null && r.beforeValue !== undefined;
+}
+
+// ============== Tab switching ==============
+function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('hidden', p.id !== 'tab-' + name));
+    if (name === 'audit')    loadAudit();
+    if (name === 'webhooks') loadWebhooks();
+}
+
+// ============== Connection / auth modal ==============
+function saveConn() {
+    const next = {
+        tenantId: document.getElementById('auth-tenant').value.trim(),
+        mode:     document.getElementById('auth-mode').value,
+        token:    document.getElementById('auth-token').value
+    };
+    if (!next.tenantId || !next.token) { toast('Tenant ID and token are required', true); return; }
+    setConn(next);
+    document.getElementById('auth-modal').close();
+    syncConnStatus();
+    refreshSidebar();
+    toast('Connected to ' + next.tenantId);
+}
+
+function syncConnStatus() {
+    const ok = hasConn();
+    document.getElementById('conn-dot').className = 'pulse-dot ' + (ok ? 'pulse-online' : 'pulse-off');
+    document.getElementById('conn-text').textContent = ok ? getConn().tenantId : 'disconnected';
+    document.getElementById('open-auth-btn').textContent = ok ? 'Change' : 'Connect';
+    document.getElementById('create-table-trigger').disabled = !ok;
+}
+
+// ============== Sidebar refresh — fired via htmx.ajax() so all our event hooks apply ==============
+function refreshSidebar() {
+    if (!hasConn()) return;
+    htmx.ajax('GET', apiBase() + '/tables', { target: '#sidebar-list', swap: 'none' });
+}
+function loadAudit() {
+    if (!hasConn()) return;
+    htmx.ajax('GET', apiBase() + '/audit?limit=100', { target: '#audit-content', swap: 'none' });
+}
+function loadWebhooks() {
+    if (!hasConn()) return;
+    htmx.ajax('GET', apiBase() + '/webhooks', { target: '#webhook-content', swap: 'none' });
+}
+function loadEntries(name) {
+    if (!hasConn()) return;
+    const id = 'entries-grid-' + name;
+    if (!document.getElementById(id)) return;
+    htmx.ajax('GET', apiBase() + '/tables/' + encodeURIComponent(name) + '/entries?limit=200',
+              { target: '#' + id, swap: 'none' });
+}
+
+function apiBase() {
+    return '/api/v1/tenants/' + encodeURIComponent(getConn().tenantId);
+}
+
+// ============== Declare a virtual table ==============
+async function declareTable() {
+    const name = document.getElementById('ct-name').value.trim();
+    const schemaStr = document.getElementById('ct-schema').value;
+    let schema;
+    try { schema = JSON.parse(schemaStr); }
+    catch (e) {
+        showInlineError('ct-error', { detail: 'Schema is not valid JSON: ' + e.message });
+        return;
+    }
+    const res = await apiFetch(apiBase() + '/tables', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ tableName: name, schema })
+    });
+    if (res.ok) {
+        document.getElementById('create-table-modal').close();
+        document.getElementById('ct-error').classList.add('hidden');
+        toast('Table "' + name + '" declared');
+        refreshSidebar();
+        selectTable(name);
+    } else {
+        const err = await res.json().catch(() => ({}));
+        if (res.status === 422 && err.violations) renderSchemaErrors(err);
+        else showInlineError('ct-error', err);
+    }
+}
+
+// ============== Schema-violation rendering (preserves user input) ==============
+function renderSchemaErrors(body) {
+    const violations = body.violations || [];
+    const html = `
+      <div class="bg-accent-rose/10 border border-accent-rose/40 rounded-card p-3" data-testid="schema-error">
+        <div class="text-[12px] uppercase tracking-wider font-semibold text-accent-rose mb-2">Schema validation failed</div>
+        <ul class="grid gap-1 text-[13px]">
+            ${violations.map(v => `<li><span class="font-mono text-accent-rose">${escapeHtml(v.path || '$')}</span> — ${escapeHtml(v.message || JSON.stringify(v))}</li>`).join('')}
+        </ul>
+      </div>`;
+    // Pick the inline-error slot that lives inside the currently-open dialog (if any),
+    // otherwise the entry-error slot (if visible on this tab).
+    const openDialog = document.querySelector('dialog[open]');
+    const slot = (openDialog && openDialog.querySelector('[data-testid$="-error"]')) ||
+                  document.getElementById('entry-error');
+    if (slot) { slot.innerHTML = html; slot.classList.remove('hidden'); }
+    else      { toast('Schema validation failed: ' + (violations[0]?.message || 'see violations'), true); }
+}
+function renderValidationErrors(body) {
+    const fields = body.fields || {};
+    const lines = Object.entries(fields).map(([f, msgs]) => `<li><span class="font-mono text-amber-300">${escapeHtml(f)}</span> — ${escapeHtml((msgs || []).join('; '))}</li>`);
+    const html = `<div class="bg-amber-500/10 border border-amber-500/40 rounded-card p-3" data-testid="request-error"><div class="text-[12px] uppercase tracking-wider font-semibold text-amber-300 mb-2">Request validation failed</div><ul class="grid gap-1 text-[13px]">${lines.join('')}</ul></div>`;
+    const slots = ['entry-error','ct-error'];
+    const slot = slots.map(id => document.getElementById(id)).find(el => el);
+    if (slot) { slot.innerHTML = html; slot.classList.remove('hidden'); }
+    else toast('Request validation failed', true);
+}
+function showInlineError(slotId, body) {
+    const el = document.getElementById(slotId);
+    if (!el) return;
+    const msg = (body && (body.detail || body.title)) || 'Unknown error';
+    el.innerHTML = `<div class="bg-accent-rose/10 border border-accent-rose/40 rounded-card p-3 text-[13px] text-accent-rose" data-testid="${slotId}-message">${escapeHtml(msg)}</div>`;
+    el.classList.remove('hidden');
+}
+function escapeHtml(s) {
+    return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+
+// ============== Select a table → render entry CRUD panel ==============
+async function selectTable(name) {
+    // Highlight the active sidebar item
+    document.querySelectorAll('#sidebar-list .nav-item').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`#sidebar-list [data-testid="sidebar-item-${cssEscape(name)}"]`);
+    if (btn) btn.classList.add('active');
+    // Make sure we're on the Tables tab
+    switchTab('tables');
+
+    // Fetch the active schema first so the form can hint the user.
+    let schema = null;
+    try {
+        const tRes = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name));
+        if (tRes.ok) {
+            const tv = await tRes.json();
+            schema = tv.schema;
+        }
+    } catch {/* ignore */}
+
+    const html = `
+      <div class="bg-surface-800 border border-surface-700 rounded-card-lg p-5 mb-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-[16px] font-semibold" data-testid="selected-table-name">${escapeHtml(name)}</h2>
+            <p class="text-[11px] text-ink-300 font-mono">${schema ? 'JSON Schema attached' : 'no schema available'}</p>
+          </div>
+          <button onclick="loadEntries('${escapeHtml(name)}')" data-testid="refresh-entries-btn"
+                  class="press text-[13px] px-3 py-1.5 bg-surface-700 text-ink-50 rounded-md hover:bg-surface-700/70">↻ Refresh</button>
+        </div>
+        ${schema ? `<details class="mb-3"><summary class="text-[12px] text-ink-200 cursor-pointer">View JSON Schema</summary><pre class="json-box mt-2" data-testid="schema-display">${escapeHtml(JSON.stringify(schema, null, 2))}</pre></details>` : ''}
+        <form id="entry-form" onsubmit="event.preventDefault(); ingestEntry('${escapeHtml(name)}')"
+              class="grid grid-cols-[200px_1fr_auto] gap-3 items-start" data-testid="entry-form">
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Record key</span>
+            <input id="entry-key" required placeholder="alice@acme.io" data-testid="entry-key-input"
+                   class="bg-surface-950 rounded-md px-3 py-2 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40"/>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wider font-semibold text-ink-300">Data (JSON)</span>
+            <textarea id="entry-data" rows="6" required data-testid="entry-data-input"
+                      class="bg-surface-950 rounded-md px-3 py-2 text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-brand/40">${schema ? escapeHtml(sampleFromSchema(schema)) : '{}'}</textarea>
+          </label>
+          <button type="submit" data-testid="entry-submit-btn"
+                  class="press self-end px-4 py-2 bg-brand text-surface-900 rounded-md font-semibold text-[13px] hover:bg-emerald-400">
+            Save entry
+          </button>
+        </form>
+        <div id="entry-error" data-testid="entry-error" class="hidden mt-3"></div>
+      </div>
+
+      <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
+           data-template="entries-tpl">
+        <div class="text-[13px] text-ink-300 italic px-2 py-3">Loading entries…</div>
+      </div>`;
+    document.getElementById('tables-content').innerHTML = html;
+    htmx.process(document.getElementById('tables-content'));
+    loadEntries(name);
+    window.__currentTable = name;
+}
+
+function cssEscape(s) { return s.replace(/[^a-zA-Z0-9_-]/g, '\\$&'); }
+
+// Build a minimal example payload from the schema's required+properties.
+function sampleFromSchema(schema) {
+    if (!schema || typeof schema !== 'object' || !schema.properties) return '{\n  \n}';
+    const out = {};
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const k of required) {
+        const t = (schema.properties[k] && schema.properties[k].type) || 'string';
+        out[k] = ({ string:'', number:0, integer:0, boolean:false, object:{}, array:[] })[t] ?? null;
+    }
+    return JSON.stringify(out, null, 2);
+}
+
+// ============== Ingest / update an entry ==============
+async function ingestEntry(name) {
+    const recordKey = document.getElementById('entry-key').value.trim();
+    const raw = document.getElementById('entry-data').value;
+    let data;
+    try { data = JSON.parse(raw); }
+    catch (e) { showInlineError('entry-error', { detail: 'Data is not valid JSON: ' + e.message }); return; }
+    const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name) + '/entries', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ recordKey, data })
+    });
+    if (res.status === 201) {
+        document.getElementById('entry-error').classList.add('hidden');
+        document.getElementById('entry-key').value = '';
+        toast('Entry "' + recordKey + '" saved');
+        loadEntries(name);
+    } else if (res.status === 409) {
+        const err = await res.json().catch(() => ({}));
+        toast(err.detail || 'Duplicate — idempotency guard skipped this write', true);
+        loadEntries(name);
+    } else {
+        const err = await res.json().catch(() => ({}));
+        if (res.status === 422 && err.violations) renderSchemaErrors(err);
+        else showInlineError('entry-error', err);
+    }
+}
+
+function editEntry(recordKey, btn) {
+    document.getElementById('entry-key').value = recordKey;
+    let data = btn.getAttribute('data-rk-data');
+    // The data was JSON-encoded already via Mustache pretty print
+    document.getElementById('entry-data').value = data;
+    document.getElementById('entry-key').focus();
+}
+
+async function deleteEntry(recordKey) {
+    if (!confirm(`Soft-delete entry "${recordKey}"? History stays in the audit log.`)) return;
+    const name = window.__currentTable;
+    const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name) + '/entries/' + encodeURIComponent(recordKey), { method:'DELETE' });
+    if (res.status === 204) {
+        toast('Entry "' + recordKey + '" deleted');
+        loadEntries(name);
+    } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.detail || ('Delete failed: ' + res.status), true);
+    }
+}
+
+// ============== Audit rollback ==============
+async function rollbackAudit(auditId) {
+    if (!confirm('Restore prior value by re-ingesting it as a new version?')) return;
+    const res = await apiFetch(apiBase() + '/audit/' + encodeURIComponent(auditId) + '/rollback', { method:'POST' });
+    if (res.status === 201) {
+        toast('Rollback applied — new version written');
+        loadAudit();
+        // If the user is currently viewing the related table, refresh the grid too.
+        if (window.__currentTable) loadEntries(window.__currentTable);
+    } else if (res.status === 409) {
+        toast('Already at that state — idempotency guard skipped the rollback', true);
+    } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.detail || ('Rollback failed: ' + res.status), true);
+    }
+}
+
+// ============== Webhook CRUD ==============
+async function createWebhook() {
+    const url    = document.getElementById('wh-url').value.trim();
+    const desc   = document.getElementById('wh-desc').value.trim();
+    const secret = document.getElementById('wh-secret').value;
+    const res = await apiFetch(apiBase() + '/webhooks', {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ url, description: desc, secret })
+    });
+    if (res.status === 201) {
+        document.getElementById('wh-url').value = '';
+        document.getElementById('wh-desc').value = '';
+        document.getElementById('wh-secret').value = '';
+        toast('Webhook added');
+        loadWebhooks();
+    } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.detail || ('Add failed: ' + res.status), true);
+    }
+}
+
+async function removeWebhook(id) {
+    if (!confirm('Remove this webhook target?')) return;
+    const res = await apiFetch(apiBase() + '/webhooks/' + encodeURIComponent(id), { method:'DELETE' });
+    if (res.status === 204) { toast('Webhook removed'); loadWebhooks(); }
+    else { toast('Remove failed: ' + res.status, true); }
+}
+
+// ============== Low-level fetch wrapper that mirrors HTMX header injection ==============
+async function apiFetch(url, init = {}) {
+    const c = getConn();
+    const headers = Object.assign({ 'Accept':'application/json' }, init.headers || {});
+    if (c.token) {
+        if (c.mode === 'bearer') headers['Authorization'] = 'Bearer ' + c.token;
+        else                     headers['X-API-Key']      = c.token;
+    }
+    return fetch(url, { ...init, headers });
+}
+
+// ============== Toast ==============
+function toast(message, isError = false) {
+    const stack = document.getElementById('toast-stack');
+    const el = document.createElement('div');
+    el.className = 'toast' + (isError ? ' error' : '');
+    el.setAttribute('data-testid', isError ? 'toast-error' : 'toast-success');
+    el.innerHTML = `<div class="text-[13px]">${escapeHtml(message)}</div>`;
+    stack.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 240ms'; }, 3200);
+    setTimeout(() => el.remove(), 3500);
+}
+
+// ============== Boot ==============
+function bootApp() {
+    const c = getConn();
+    document.getElementById('auth-tenant').value = c.tenantId;
+    document.getElementById('auth-mode').value   = c.mode;
+    document.getElementById('auth-token').value  = c.token;
+    syncConnStatus();
+    if (hasConn()) refreshSidebar();
+    else document.getElementById('auth-modal').showModal();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootApp, { once: true });
+} else {
+    bootApp();
+}
+</script>
 </body>
 </html>

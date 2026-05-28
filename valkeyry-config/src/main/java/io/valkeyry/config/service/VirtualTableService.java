@@ -181,9 +181,102 @@ public class VirtualTableService {
     }
 
     // -----------------------------------------------------------------------
-    // Read / search / history
+    // Soft-delete & rollback
     // -----------------------------------------------------------------------
 
+    /**
+     * Soft-deletes the current head of a logical record.
+     *
+     * <p>Marks the current {@code is_latest = true} row as superseded ({@code is_latest = false})
+     * and writes a {@code DELETE_RECORD} audit row whose {@code beforeValue} captures the payload
+     * that was deleted. No new {@code virtual_table_entry} row is inserted, so {@link #browse} naturally
+     * stops returning the record. History remains intact (older versions stay queryable).</p>
+     *
+     * <p>Failing with {@link VirtualTableNotFoundException} when no head exists for that key.</p>
+     */
+    public Mono<Void> softDelete(String tenantId, String tableName, String recordKey,
+                                 String subject, String actorTrack, String requestId) {
+        Mono<Void> work = entries.findLatest(tenantId, tableName, recordKey)
+                .switchIfEmpty(Mono.error(new VirtualTableNotFoundException(tenantId, tableName + "/" + recordKey)))
+                .flatMap(head -> {
+                    JsonNode before = parsePayloadSafely(head.getData());
+                    return entries.markPreviousLatestStale(tenantId, tableName, recordKey)
+                            .then(audit.record(tenantId, tableName,
+                                    ConfigAuditService.Operation.DELETE_RECORD,
+                                    recordKey, before, mapper.nullNode(),
+                                    subject, actorTrack, requestId));
+                })
+                .then();
+        return tx.transactional(work);
+    }
+
+    /**
+     * Restores the value an audit row's {@code beforeValue} pointed to by re-ingesting it
+     * as a new version of the same logical record.
+     *
+     * <p>The replay goes through the standard ingest path, so JSON Schema validation and the
+     * Idempotency Guard both apply. The new audit row is tagged {@code ROLLBACK} rather than
+     * {@code INGEST_RECORD} so the timeline can highlight it. Tables-level audit ops
+     * ({@code DECLARE_TABLE}/{@code REVISE_TABLE}) are not rollback-able through this path.</p>
+     */
+    public Mono<EntryView> rollback(String tenantId, String tableName, String recordKey, JsonNode beforeValue,
+                                    String subject, String actorTrack, String requestId) {
+        if (beforeValue == null || beforeValue.isNull()) {
+            return Mono.error(new IllegalArgumentException("Cannot roll back: audit entry has no prior value"));
+        }
+        Mono<EntryView> work = registries.findActive(tenantId, tableName)
+                .switchIfEmpty(Mono.error(new VirtualTableNotFoundException(tenantId, tableName)))
+                .flatMap(reg -> {
+                    JsonNode schemaNode = parseSchemaSafely(reg.getSchemaDefinition());
+                    validator.validateOrThrow(schemaNode, beforeValue);
+                    String hash = PayloadFingerprint.sha256(beforeValue);
+                    return entries.findDuplicate(tenantId, tableName, recordKey, hash)
+                            .flatMap(dup -> audit.record(tenantId, tableName,
+                                            ConfigAuditService.Operation.DEDUP_SKIP,
+                                            recordKey, beforeValue, beforeValue, subject, actorTrack, requestId)
+                                    .then(Mono.<EntryView>error(new IdempotentDuplicateException(recordKey, hash))))
+                            .switchIfEmpty(insertRollbackVersion(tenantId, tableName, recordKey, beforeValue, hash,
+                                    subject, actorTrack, requestId));
+                });
+        return tx.transactional(work);
+    }
+
+    private Mono<EntryView> insertRollbackVersion(String tenantId, String tableName, String recordKey,
+                                                  JsonNode payload, String hash, String subject,
+                                                  String actorTrack, String requestId) {
+        Mono<JsonNode> beforeMono = entries.findLatest(tenantId, tableName, recordKey)
+                .map(e -> parsePayloadSafely(e.getData()))
+                .defaultIfEmpty(mapper.nullNode());
+
+        return beforeMono.flatMap(before -> entries.maxVersion(tenantId, tableName, recordKey)
+                .defaultIfEmpty(0L)
+                .flatMap(prev -> entries.markPreviousLatestStale(tenantId, tableName, recordKey)
+                        .thenReturn(prev))
+                .flatMap(prev -> {
+                    VirtualTableEntry row = new VirtualTableEntry();
+                    row.setId(UUID.randomUUID());
+                    row.setTenantId(tenantId);
+                    row.setTableName(tableName);
+                    row.setRecordKey(recordKey);
+                    row.setPayloadHash(hash);
+                    row.setVersion(prev + 1);
+                    row.setLatest(true);
+                    row.setData(Json.of(payload.toString()));
+                    row.setCreatedAt(Instant.now());
+                    row.setCreatedBy(subject);
+                    return entries.save(row);
+                })
+                .flatMap(saved -> audit.record(tenantId, tableName,
+                                ConfigAuditService.Operation.ROLLBACK,
+                                recordKey, before, payload, subject, actorTrack, requestId)
+                        .thenReturn(saved))
+                .map(this::toView)
+                .doOnNext(v -> log.debug("Rolled back {}/{}/{} to v{}", tenantId, tableName, recordKey, v.version())));
+    }
+
+    // -----------------------------------------------------------------------
+    // Read / search / history
+    // -----------------------------------------------------------------------
     public Mono<EntryView> getLatest(String tenantId, String tableName, String recordKey) {
         return entries.findLatest(tenantId, tableName, recordKey).map(this::toView);
     }
