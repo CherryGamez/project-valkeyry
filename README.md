@@ -32,6 +32,26 @@ mvn -version     # Maven 3.8.7+ running on Java 21
 docker info      # daemon reachable
 ```
 
+### Character encoding
+
+The entire stack is UTF-8 end-to-end: source files (`project.build.sourceEncoding=UTF-8`), HTTP (Spring WebFlux + Jackson default to UTF-8), and static assets. To ensure German umlauts (`ä ö ü ß ÄÖÜ ẞ`) and other Unicode round-trip correctly through the database, the Postgres instance **must** be initialised with UTF-8. If you provision the database manually:
+
+```sql
+CREATE DATABASE ipaas
+  WITH ENCODING 'UTF8'
+       LC_COLLATE = 'en_US.UTF-8'
+       LC_CTYPE   = 'en_US.UTF-8'
+       TEMPLATE   = template0;
+
+CREATE DATABASE valkeyry_config
+  WITH ENCODING 'UTF8'
+       LC_COLLATE = 'en_US.UTF-8'
+       LC_CTYPE   = 'en_US.UTF-8'
+       TEMPLATE   = template0;
+```
+
+The official `postgres:16` Docker image and the local-dev compose stack already use UTF-8 by default, so no extra configuration is needed there.
+
 ---
 
 ## 2. Build the entire reactor
