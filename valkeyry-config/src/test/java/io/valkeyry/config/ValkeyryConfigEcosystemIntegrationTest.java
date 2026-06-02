@@ -78,7 +78,7 @@ class ValkeyryConfigEcosystemIntegrationTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("valkeyry_config")
-            .withUsername("valkeyry")
+            .withUsername("postgres")
             .withPassword("valkeyry");
 
     private static MockOAuth2Server OAUTH;

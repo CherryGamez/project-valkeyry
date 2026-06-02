@@ -23,6 +23,7 @@
         <module>valkeyry-config-plugin</module>
         <module>valkeyry-ipaas</module>
         <module>valkeyry-config</module>
+        <module>valkeyry-ipaas-demo-client</module>
     </modules>
 
     <properties>
