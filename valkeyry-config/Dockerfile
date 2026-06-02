@@ -23,14 +23,24 @@ RUN mvn -B -ntp -pl valkeyry-config -am package -DskipTests
 
 # ---- runtime stage ----
 FROM eclipse-temurin:21-jre-alpine
-RUN addgroup -S valkeyry && adduser -S valkeyry -G valkeyry
+RUN addgroup -S valkeyry && adduser -S valkeyry -G valkeyry \
+ && apk add --no-cache curl ca-certificates tini
 USER valkeyry:valkeyry
 WORKDIR /app
 COPY --from=build /workspace/valkeyry-config/target/valkeyry-config-*.jar /app/app.jar
 
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+UseZGC"
-EXPOSE 8081
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:8081/actuator/health | grep -q '"status":"UP"' || exit 1
+# All ports & TLS material come from env at runtime (12-factor).
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+UseZGC" \
+    VALKEYRY_CONFIG_PORT=8081 \
+    VALKEYRY_SSL_ENABLED=false
 
-ENTRYPOINT ["sh","-c","exec java $JAVA_OPTS -jar /app/app.jar"]
+EXPOSE 8081 8443
+
+# K8s drives liveness/readiness through /actuator/health/{liveness,readiness}.
+# This HEALTHCHECK keeps Docker/Compose users covered with no extra config.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS "http${VALKEYRY_SSL_ENABLED:+s}://localhost:${VALKEYRY_CONFIG_PORT}/actuator/health" \
+        | grep -q '"status":"UP"' || exit 1
+
+# tini handles PID-1 signal forwarding so graceful shutdown actually happens.
+ENTRYPOINT ["/sbin/tini","--","sh","-c","exec java $JAVA_OPTS -jar /app/app.jar"]

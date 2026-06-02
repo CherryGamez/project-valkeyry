@@ -341,3 +341,95 @@ and (5) a live preview URL they can drive in-browser.
 - P2 — Extend the Visual Builder to read existing nested objects / `oneOf`
   variants (still falls through to Raw JSON today).
 - P2 — Add a "Replay this invocation as a curl" button on each history row.
+
+### 2026-02-14 (evening) — HTTPS, ports, cloud-native, field projection, nested/oneOf builder
+**Problem**: production checklist — TLS termination at the app, every port
+env-driven, full Kubernetes/Helm artifacts, opt-in field-level output
+projection, and the Visual Builder needed to handle complex schemas
+(nested objects and `oneOf` discriminated unions).
+
+**What shipped**
+1. **HTTPS / TLS via env vars**
+   - `application.yml` now reads `VALKEYRY_SSL_ENABLED`, `VALKEYRY_SSL_CERT_PEM`,
+     `VALKEYRY_SSL_KEY_PEM` (Spring 3+ native PEM support — works equally
+     for a bundled `.pem` or a separate `.crt`+`.key` pair), plus optional
+     `VALKEYRY_SSL_TRUST_PEM` / `VALKEYRY_SSL_CLIENT_AUTH` for mTLS, and
+     pins `TLSv1.2,TLSv1.3`.
+   - `VALKEYRY_CONFIG_PORT`, `VALKEYRY_CONFIG_BIND`, `VALKEYRY_MGMT_PORT`
+     are all env-overridable; the management endpoint moves to its own
+     port automatically.
+   - Actuator `liveness` + `readiness` probe groups enabled.
+2. **Cloud-native packaging**
+   - Hardened `Dockerfile` — `tini` PID 1, non-root, `EXPOSE 8081 8443`,
+     HEALTHCHECK adapts to HTTP/HTTPS based on `VALKEYRY_SSL_ENABLED`.
+   - **Raw K8s manifests** (`deploy/k8s/valkeyry-config.yaml`): Namespace,
+     ConfigMap (every env var), DB Secret, TLS Secret, ServiceAccount,
+     Service (HTTPS + management ports), Deployment (rolling, non-root,
+     readOnlyRootFilesystem, drop ALL capabilities, topology spread,
+     graceful shutdown, separate liveness/readiness probes against the
+     management port), PodDisruptionBudget (`minAvailable: 1`),
+     HorizontalPodAutoscaler (2→10 @ 60% CPU), Ingress (cert-manager
+     annotated, backend-protocol HTTPS).
+   - **Helm chart** (`deploy/helm/valkeyry-config/`) — single-template
+     bundle, three TLS modes (off / external Secret / cert-manager
+     Certificate), Prometheus scrape annotations + optional
+     ServiceMonitor, full values.yaml documenting every knob.
+3. **Field projection on read endpoints**
+   - New `FieldProjection.java` helper plus a `?fields=` query param on
+     `GET /tables/{name}/entries` and `POST /tables/{name}/search` —
+     CSV of top-level columns and/or dotted `data.<key>` reaches into
+     the JSONB payload. Empty/missing → all fields (default contract).
+   - Mock backend mirrors the contract so the live preview shows the
+     filter working.
+   - GUI: a `Columns: recordKey,data.role,…` filter textbox + reset
+     button next to the table's Refresh control. Debounced 400ms.
+4. **Visual Builder — nested object + `oneOf`**
+   - Two new widget types: **Nested object** (renders a sub-panel with
+     its own `+ Add nested field` button — recursive any depth) and
+     **oneOf (discriminated)** (each variant is a sub-card with its own
+     discriminator value and child fields).
+   - `schemaBuilderToSchema` recursively emits Draft 2020-12 shapes:
+     `{type:object, properties:{...}, required:[...]}` for nested, and
+     `{oneOf:[{type:object, properties:{disc:{enum:[X]},...}, required:[disc,...]}, …]}`
+     for variants.
+   - `schemaBuilderLoadFromSchema` recursively reverse-loads both shapes,
+     auto-detecting the discriminator key (the property common to every
+     variant whose enum is a single-element string).
+
+**Testing performed**
+- `node --check` PASS on the rewritten JS.
+- Live preview smoke (against the running mock backend):
+  - `GET /…/users/entries?fields=recordKey,data.role` →
+    `[{recordKey:"…",data:{role:"viewer"}}, …]` ✅ (verified by curl)
+  - Visual Builder programmatic schema build:
+    - `address` (nested object, 3 props, 1 required) ✅
+    - `paymentMethod` (oneOf with `card` and `paypal` variants, each with
+      their own fields and required arrays, discriminator prefixed) ✅
+    - Round-trip through `schemaBuilderLoadFromSchema` reproduced the
+      same `address.properties` (3) and the same 2 oneOf variants ✅
+- Java code visually validated; `helm template deploy/helm/valkeyry-config`
+  and `kubectl --dry-run=client apply -f deploy/k8s/` not executed in-pod
+  (no helm/kubectl available) — please verify on a workstation with both
+  CLIs installed.
+
+**Files touched (this iteration)**
+- `valkeyry-config/src/main/resources/application.yml` (HTTPS + probes + ports)
+- `valkeyry-config/Dockerfile` (tini, dual-port EXPOSE, HTTPS-aware HEALTHCHECK)
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/FieldProjection.java` (new)
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/VirtualTableController.java` (`?fields=`)
+- `valkeyry-config/src/main/resources/static/index.html` (+ nested/oneOf builder, field filter ~250 lines)
+- `valkeyry-config/deploy/{README.md,k8s/valkeyry-config.yaml,helm/valkeyry-config/**}` (new — 7 files)
+- `backend/server.py` (mock backend: `?fields=` + `project()` helper)
+
+**Next / Backlog**
+- P1 — JVM run-through: `mvn -pl valkeyry-config -am package`, verify
+  HTTPS bootstraps with a self-signed PEM + `VALKEYRY_SSL_ENABLED=true`.
+- P1 — `helm template deploy/helm/valkeyry-config` + `kubeval` on a CI
+  host to catch any chart bugs from the in-pod authoring.
+- P2 — Visual Builder: add **array-of-objects** widget (today arrays are
+  limited to enum-of-string multi-choice).
+- P2 — Field projection for nested data structures deeper than one level
+  (e.g. `data.address.city`) — backend currently understands only one
+  dot.
+- P2 — Helm chart: bundle a NetworkPolicy template (default-deny + allow
+  Postgres + Ingress).

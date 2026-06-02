@@ -886,7 +886,10 @@ function loadEntries(name) {
     if (!hasConn()) return;
     const id = 'entries-grid-' + name;
     if (!document.getElementById(id)) return;
-    htmx.ajax('GET', apiBase() + '/tables/' + encodeURIComponent(name) + '/entries?limit=200',
+    // Honour an optional caller-set field projection — by default every column is returned.
+    const fields = (window.__entryFields || '').trim();
+    const qs = '?limit=200' + (fields ? '&fields=' + encodeURIComponent(fields) : '');
+    htmx.ajax('GET', apiBase() + '/tables/' + encodeURIComponent(name) + '/entries' + qs,
               { target: '#' + id, swap: 'none' });
 }
 
@@ -1166,8 +1169,16 @@ async function selectTable(name) {
             <h2 class="text-[20px] font-semibold tracking-tight" data-testid="selected-table-name">${escapeHtml(name)}</h2>
             <p class="text-[11px] text-ink-500 font-mono">${schema ? 'JSON Schema attached' : 'no schema available'}</p>
           </div>
-          <button onclick="loadEntries('${escapeHtml(name)}')" data-testid="refresh-entries-btn"
-                  class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
+          <div class="flex items-center gap-2">
+              <input id="entry-fields-filter" data-testid="entry-fields-filter"
+                     class="ios-input text-[12px] font-mono max-w-[280px]"
+                     placeholder="Columns: recordKey,data.email,…"
+                     oninput="window.__entryFields = this.value; window.__entryFieldsApplyTimer && clearTimeout(window.__entryFieldsApplyTimer); window.__entryFieldsApplyTimer = setTimeout(() => loadEntries('${escapeHtml(name)}'), 400);"/>
+              <button onclick="window.__entryFields=''; document.getElementById('entry-fields-filter').value=''; loadEntries('${escapeHtml(name)}')" data-testid="entry-fields-reset-btn"
+                      class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill" title="Reset to all columns">×</button>
+              <button onclick="loadEntries('${escapeHtml(name)}')" data-testid="refresh-entries-btn"
+                      class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
+          </div>
         </div>
         ${schema ? `<details class="mb-4"><summary class="text-[12px] text-ink-700 cursor-pointer hover:text-ios-blue">View JSON Schema</summary><pre class="json-box mt-2" data-testid="schema-display">${escapeHtml(JSON.stringify(schema, null, 2))}</pre></details>` : ''}
 
@@ -1808,16 +1819,19 @@ const SB_WIDGETS = [
     { key:'integer',    label:'Integer',       jsType:'integer' },
     { key:'boolean',    label:'Checkbox (boolean)', jsType:'boolean' },
     { key:'dropdown',   label:'Dropdown (single choice)', jsType:'string', needsOptions:true },
-    { key:'multi',      label:'Multi-choice',            jsType:'array',  needsOptions:true }
+    { key:'multi',      label:'Multi-choice',            jsType:'array',  needsOptions:true },
+    { key:'object',     label:'Nested object',           jsType:'object', complex:true },
+    { key:'oneof',      label:'oneOf (discriminated)',   jsType:'object', complex:true }
 ];
 
 let __sbFields = [];   // [{ id, name, title, widget, required, defaultVal, options, min, max, pattern, description }]
 let __sbSeq    = 0;
 let __sbMode   = 'builder';
 
-function schemaBuilderAddField(initial) {
+function schemaBuilderAddField(initial, parentArr) {
     const seed = initial || {};
-    __sbFields.push({
+    const arr  = parentArr || __sbFields;
+    arr.push({
         id: ++__sbSeq,
         name:        seed.name        || ('field' + __sbSeq),
         title:       seed.title       || '',
@@ -1828,16 +1842,30 @@ function schemaBuilderAddField(initial) {
         min:         seed.min         != null ? String(seed.min) : '',
         max:         seed.max         != null ? String(seed.max) : '',
         pattern:     seed.pattern     || '',
-        description: seed.description || ''
+        description: seed.description || '',
+        children:    Array.isArray(seed.children) ? seed.children : [],
+        variants:    Array.isArray(seed.variants) ? seed.variants : []
     });
     schemaBuilderRender();
     schemaBuilderSync();
 }
 
 function schemaBuilderRemoveField(id) {
-    __sbFields = __sbFields.filter(f => f.id !== id);
-    schemaBuilderRender();
-    schemaBuilderSync();
+    const removed = removeById(__sbFields, id);
+    if (removed) { schemaBuilderRender(); schemaBuilderSync(); }
+}
+function removeById(arr, id) {
+    const i = arr.findIndex(f => f.id === id);
+    if (i >= 0) { arr.splice(i, 1); return true; }
+    for (const f of arr) {
+        if (Array.isArray(f.children) && removeById(f.children, id)) return true;
+        if (Array.isArray(f.variants)) {
+            for (const v of f.variants) {
+                if (Array.isArray(v.children) && removeById(v.children, id)) return true;
+            }
+        }
+    }
+    return false;
 }
 
 function schemaBuilderRender() {
@@ -1916,6 +1944,86 @@ function schemaBuilderRow(f) {
     }
 
     if (extras.children.length) wrap.appendChild(extras);
+
+    // ── Row 4: nested children (object) / variants (oneOf) ──
+    if (widget.key === 'object') {
+        const nested = document.createElement('div');
+        nested.className = 'rounded-card border border-dashed border-hairline bg-card-sub p-2.5 grid gap-2 ml-3';
+        nested.dataset.testid = 'sb-nested-' + f.id;
+        const hd = document.createElement('div');
+        hd.className = 'flex items-center justify-between';
+        hd.innerHTML = '<span class="section-label">Nested fields</span>';
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'btn-secondary press text-[11px] px-2.5 py-1';
+        add.dataset.testid = 'sb-add-child-' + f.id;
+        add.textContent = '+ Add nested field';
+        add.onclick = () => schemaBuilderAddField({}, f.children);
+        hd.appendChild(add);
+        nested.appendChild(hd);
+        if (f.children.length === 0) {
+            const e = document.createElement('div');
+            e.className = 'text-[11px] text-ink-500 italic';
+            e.textContent = '(empty — add at least one nested field)';
+            nested.appendChild(e);
+        } else {
+            f.children.forEach(c => nested.appendChild(schemaBuilderRow(c)));
+        }
+        wrap.appendChild(nested);
+    } else if (widget.key === 'oneof') {
+        const wrap2 = document.createElement('div');
+        wrap2.className = 'rounded-card border border-dashed border-hairline bg-card-sub p-2.5 grid gap-2 ml-3';
+        wrap2.dataset.testid = 'sb-variants-' + f.id;
+        const hd = document.createElement('div');
+        hd.className = 'flex items-center justify-between';
+        hd.innerHTML = '<span class="section-label">Variants — discriminator key: <code class="font-mono text-ink-700">' + escapeHtml(f.name || 'kind') + '</code></span>';
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'btn-secondary press text-[11px] px-2.5 py-1';
+        add.dataset.testid = 'sb-add-variant-' + f.id;
+        add.textContent = '+ Add variant';
+        add.onclick = () => {
+            f.variants.push({ id: ++__sbSeq, label: 'variant' + (f.variants.length + 1), children: [] });
+            schemaBuilderRender(); schemaBuilderSync();
+        };
+        hd.appendChild(add);
+        wrap2.appendChild(hd);
+        if (f.variants.length === 0) {
+            const e = document.createElement('div');
+            e.className = 'text-[11px] text-ink-500 italic';
+            e.textContent = '(no variants yet — add at least two)';
+            wrap2.appendChild(e);
+        }
+        f.variants.forEach(v => {
+            const card = document.createElement('div');
+            card.className = 'rounded-card border border-hairline bg-white p-2 grid gap-2';
+            card.dataset.testid = 'sb-variant-' + v.id;
+            const head = document.createElement('div');
+            head.className = 'grid gap-2 md:grid-cols-[1fr_auto] items-end';
+            head.appendChild(sbInput('Discriminator value', 'text', v.label,
+                val => { v.label = val; schemaBuilderSync(); },
+                { mono:true, testid:'sb-variant-label-' + v.id, placeholder:'e.g. card, paypal, bank' }));
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'btn-danger press text-[11px] px-2.5 py-1';
+            del.textContent = 'Remove variant';
+            del.dataset.testid = 'sb-variant-del-' + v.id;
+            del.onclick = () => { f.variants = f.variants.filter(x => x.id !== v.id); schemaBuilderRender(); schemaBuilderSync(); };
+            head.appendChild(del);
+            card.appendChild(head);
+            const add2 = document.createElement('button');
+            add2.type = 'button';
+            add2.className = 'btn-secondary press text-[11px] px-2.5 py-1 w-fit';
+            add2.dataset.testid = 'sb-variant-addchild-' + v.id;
+            add2.textContent = '+ Add field to this variant';
+            add2.onclick = () => schemaBuilderAddField({}, v.children);
+            card.appendChild(add2);
+            (v.children || []).forEach(c => card.appendChild(schemaBuilderRow(c)));
+            wrap2.appendChild(card);
+        });
+        wrap.appendChild(wrap2);
+    }
+
     return wrap;
 }
 
@@ -1971,6 +2079,64 @@ function sbCheckbox(label, checked, onChange, testid) {
     return l;
 }
 
+// Build a single JSON-Schema property node from one field. Recurses into
+// children (object) / variants (oneOf).
+function fieldToProperty(f) {
+    const widget = SB_WIDGETS.find(w => w.key === f.widget) || SB_WIDGETS[0];
+    let node;
+    if (widget.key === 'object') {
+        const props = {};
+        const required = [];
+        (f.children || []).forEach(c => {
+            if (!c.name || !c.name.trim()) return;
+            props[c.name.trim()] = fieldToProperty(c);
+            if (c.required) required.push(c.name.trim());
+        });
+        node = { type: 'object', properties: props, additionalProperties: false };
+        if (required.length) node.required = required;
+    } else if (widget.key === 'oneof') {
+        const disc = f.name || 'kind';
+        node = {
+            oneOf: (f.variants || []).map(v => {
+                const variantProps = {};
+                const variantReq = [];
+                variantProps[disc] = { type: 'string', enum: [v.label] };
+                variantReq.push(disc);
+                (v.children || []).forEach(c => {
+                    if (!c.name || !c.name.trim()) return;
+                    variantProps[c.name.trim()] = fieldToProperty(c);
+                    if (c.required) variantReq.push(c.name.trim());
+                });
+                return { type: 'object', properties: variantProps, required: variantReq, additionalProperties: false };
+            })
+        };
+    } else if (widget.key === 'multi') {
+        node = { type: 'array', uniqueItems: true,
+                 items: { type: 'string', enum: splitOptions(f.options) } };
+    } else if (widget.key === 'dropdown') {
+        node = { type: 'string', enum: splitOptions(f.options) };
+    } else {
+        node = { type: widget.jsType };
+        if (widget.format) node.format = widget.format;
+    }
+    if (f.title       && f.title.trim())       node.title       = f.title.trim();
+    if (f.description && f.description.trim()) node.description = f.description.trim();
+    if (f.pattern && f.pattern.trim() && node.type === 'string' && !node.enum && !node.format) {
+        node.pattern = f.pattern.trim();
+    }
+    if (node.type === 'number' || node.type === 'integer') {
+        if (f.min !== '' && !isNaN(parseFloat(f.min))) node.minimum = parseFloat(f.min);
+        if (f.max !== '' && !isNaN(parseFloat(f.max))) node.maximum = parseFloat(f.max);
+    }
+    if (f.defaultVal !== '' && f.defaultVal != null) {
+        if (widget.key === 'boolean')           node.default = f.defaultVal === 'true';
+        else if (node.type === 'integer')       node.default = parseInt(f.defaultVal, 10);
+        else if (node.type === 'number')        node.default = parseFloat(f.defaultVal);
+        else if (!['multi','object','oneof'].includes(widget.key)) node.default = f.defaultVal;
+    }
+    return node;
+}
+
 // Convert __sbFields → JSON-Schema document and write it into #ct-schema.
 function schemaBuilderToSchema() {
     const properties = {};
@@ -1978,35 +2144,7 @@ function schemaBuilderToSchema() {
     __sbFields.forEach(f => {
         if (!f.name || !f.name.trim()) return;
         const key = f.name.trim();
-        const widget = SB_WIDGETS.find(w => w.key === f.widget) || SB_WIDGETS[0];
-        const node = {};
-        if (widget.key === 'multi') {
-            node.type = 'array';
-            node.uniqueItems = true;
-            node.items = { type: 'string', enum: splitOptions(f.options) };
-        } else if (widget.key === 'dropdown') {
-            node.type = 'string';
-            node.enum = splitOptions(f.options);
-        } else {
-            node.type = widget.jsType;
-            if (widget.format) node.format = widget.format;
-        }
-        if (f.title       && f.title.trim())       node.title       = f.title.trim();
-        if (f.description && f.description.trim()) node.description = f.description.trim();
-        if (f.pattern     && f.pattern.trim() && node.type === 'string' && !node.enum && !node.format) {
-            node.pattern = f.pattern.trim();
-        }
-        if ((node.type === 'number' || node.type === 'integer')) {
-            if (f.min !== '' && !isNaN(parseFloat(f.min))) node.minimum = parseFloat(f.min);
-            if (f.max !== '' && !isNaN(parseFloat(f.max))) node.maximum = parseFloat(f.max);
-        }
-        if (f.defaultVal !== '' && f.defaultVal != null) {
-            if (widget.key === 'boolean')           node.default = f.defaultVal === 'true';
-            else if (node.type === 'integer')       node.default = parseInt(f.defaultVal, 10);
-            else if (node.type === 'number')        node.default = parseFloat(f.defaultVal);
-            else if (widget.key !== 'multi')        node.default = f.defaultVal;
-        }
-        properties[key] = node;
+        properties[key] = fieldToProperty(f);
         if (f.required) required.push(key);
     });
     const schema = {
@@ -2041,35 +2179,82 @@ function schemaBuilderLoadFromSchema(schema) {
         schemaBuilderRender();
         return;
     }
-    const requiredSet = new Set(Array.isArray(schema.required) ? schema.required : []);
-    __sbFields = [];
-    Object.entries(schema.properties).forEach(([key, def]) => {
+    __sbFields = propertiesToFields(schema.properties, schema.required || []);
+    schemaBuilderRender();
+    schemaBuilderSync();
+}
+
+function propertiesToFields(props, requiredArr) {
+    const requiredSet = new Set(Array.isArray(requiredArr) ? requiredArr : []);
+    const out = [];
+    Object.entries(props || {}).forEach(([key, def]) => {
         const widget = detectWidget(def);
-        if (!widget) return;   // skip unsupported (e.g. nested object, oneOf) — kept in Raw JSON
-        __sbFields.push({
+        if (!widget) return;
+        const field = {
             id: ++__sbSeq,
             name: key,
             title: def.title || '',
             widget: widget.key,
             required: requiredSet.has(key),
-            defaultVal: def.default != null ? String(def.default) : '',
+            defaultVal: def.default != null ? (typeof def.default === 'object' ? JSON.stringify(def.default) : String(def.default)) : '',
             options: widget.key === 'multi'    ? (def.items && def.items.enum || []).join(', ')
                   : widget.key === 'dropdown'  ? (def.enum || []).join(', ')
                   : '',
             min: def.minimum != null ? String(def.minimum) : '',
             max: def.maximum != null ? String(def.maximum) : '',
             pattern: def.pattern || '',
-            description: def.description || ''
-        });
+            description: def.description || '',
+            children: [],
+            variants: []
+        };
+        if (widget.key === 'object' && def.properties) {
+            field.children = propertiesToFields(def.properties, def.required || []);
+        } else if (widget.key === 'oneof' && Array.isArray(def.oneOf)) {
+            // Detect the discriminator key as the property all variants share with a single-element enum.
+            const discKey = detectDiscriminator(def.oneOf) || 'kind';
+            field.name = discKey;   // reuse `name` for the discriminator
+            field.variants = def.oneOf.map(variantSchema => {
+                const props = { ...(variantSchema.properties || {}) };
+                const label = (props[discKey] && Array.isArray(props[discKey].enum) && props[discKey].enum[0]) || 'variant';
+                delete props[discKey];
+                return {
+                    id: ++__sbSeq,
+                    label,
+                    children: propertiesToFields(props, (variantSchema.required || []).filter(r => r !== discKey))
+                };
+            });
+        }
+        out.push(field);
     });
-    schemaBuilderRender();
-    schemaBuilderSync();
+    return out;
+}
+
+function detectDiscriminator(oneOfArr) {
+    if (!Array.isArray(oneOfArr) || oneOfArr.length === 0) return null;
+    const candidates = new Set(Object.keys((oneOfArr[0].properties || {})));
+    for (let i = 1; i < oneOfArr.length; i++) {
+        const propsI = oneOfArr[i].properties || {};
+        for (const k of [...candidates]) {
+            if (!(k in propsI)) candidates.delete(k);
+        }
+    }
+    for (const k of candidates) {
+        // Match a property that's a single-element string enum in every variant.
+        const ok = oneOfArr.every(v => {
+            const p = (v.properties || {})[k];
+            return p && p.type === 'string' && Array.isArray(p.enum) && p.enum.length === 1;
+        });
+        if (ok) return k;
+    }
+    return null;
 }
 
 function detectWidget(def) {
     if (!def || typeof def !== 'object') return null;
-    if (def.oneOf || def.anyOf) return null;       // discriminated → stay in JSON mode
-    if (def.type === 'object') return null;        // nested → JSON mode
+    if (Array.isArray(def.oneOf)) return SB_WIDGETS.find(w => w.key === 'oneof');
+    if (def.anyOf) return null;
+    if (def.type === 'object' && def.properties) return SB_WIDGETS.find(w => w.key === 'object');
+    if (def.type === 'object') return null;
     if (def.type === 'array' && def.items && Array.isArray(def.items.enum)) {
         return SB_WIDGETS.find(w => w.key === 'multi');
     }

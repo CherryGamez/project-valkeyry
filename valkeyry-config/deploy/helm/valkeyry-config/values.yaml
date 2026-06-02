@@ -1,0 +1,100 @@
+# ─── Image ────────────────────────────────────────────────────────────────
+image:
+  repository: ghcr.io/valkeyry/valkeyry-config
+  tag: ""                # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# ─── Replication & autoscaling ────────────────────────────────────────────
+replicaCount: 2
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ─── Ports ────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  httpPort: 8443           # exposes whichever (HTTP or HTTPS) is enabled
+  managementPort: 8444
+
+# ─── HTTPS / TLS ──────────────────────────────────────────────────────────
+# Three modes:
+#   tls.enabled=false                 → HTTP only (dev)
+#   tls.enabled=true + secretName     → mount a pre-existing kubernetes.io/tls Secret
+#   tls.enabled=true + certManager.*  → cert-manager issues + rotates the cert
+tls:
+  enabled: true
+  secretName: valkeyry-tls
+  certManager:
+    enabled: false
+    issuerKind: ClusterIssuer
+    issuerName: letsencrypt-prod
+    commonName: valkeyry-config.example.com
+    dnsNames: [valkeyry-config.example.com]
+
+# ─── Postgres connectivity (R2DBC + Flyway) ───────────────────────────────
+postgres:
+  # Set these directly OR reference an existing Secret via existingSecretName.
+  url:    "r2dbc:postgresql://postgres.valkeyry:5432/valkeyry_config"
+  jdbcUrl: "jdbc:postgresql://postgres.valkeyry:5432/valkeyry_config"
+  user:   "valkeyry"
+  password: ""                     # leave blank → expect existingSecretName
+  existingSecretName: ""           # secret must expose VALKEYRY_CONFIG_DB_PASS
+  existingSecretKey:  "VALKEYRY_CONFIG_DB_PASS"
+
+# ─── OIDC / LDAP / API-keys ───────────────────────────────────────────────
+auth:
+  oidc:
+    issuer: "https://oidc.example.com/realms/valkeyry"
+  ldap:
+    enabled: false
+    url: "ldap://openldap.valkeyry:1389"
+    baseDn: "dc=valkeyry,dc=io"
+    userDnPattern: "uid={0},ou=people,dc=valkeyry,dc=io"
+  apiKeys:
+    # CSV of  key:tenant[,tenant]
+    csv: ""
+
+# ─── Ingress ──────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  host: valkeyry-config.example.com
+  path: /
+  tls: true
+
+# ─── Pod hardening ────────────────────────────────────────────────────────
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests: { cpu: "200m", memory: "512Mi" }
+  limits:   { cpu: "1",    memory: "1Gi" }
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+
+# ─── Observability ────────────────────────────────────────────────────────
+monitoring:
+  prometheusScrape: true
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}

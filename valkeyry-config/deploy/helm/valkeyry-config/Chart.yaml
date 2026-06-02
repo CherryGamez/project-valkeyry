@@ -1,0 +1,10 @@
+apiVersion: v2
+name: valkeyry-config
+description: Headless schema-registry — JSON-Schema-backed virtual tables with dedup, audit and webhook fan-out.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+icon: https://avatars.githubusercontent.com/u/0?v=4
+maintainers:
+  - name: Valkeyry
+    url: https://github.com/valkeyry

@@ -236,6 +236,37 @@ def validate(schema: Dict[str, Any], value: Any) -> List[Dict[str, str]]:
     return errs
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Field projection — `?fields=email,role,data.role` style query param.
+# Top-level keys filter the EntryView shape; dotted keys reach into `data`.
+# Empty/missing → return all keys (the default contract).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def project(entry: Dict[str, Any], fields_csv: Optional[str]) -> Dict[str, Any]:
+    if not fields_csv:
+        return entry
+    wanted = [f.strip() for f in fields_csv.split(",") if f.strip()]
+    if not wanted:
+        return entry
+    out: Dict[str, Any] = {}
+    nested_keys: List[str] = []
+    for f in wanted:
+        if "." in f:
+            nested_keys.append(f)
+        elif f in entry:
+            out[f] = entry[f]
+    if nested_keys:
+        data = entry.get("data") or {}
+        out.setdefault("data", {})
+        for nk in nested_keys:
+            head, _, tail = nk.partition(".")
+            if head != "data":
+                continue
+            if tail in (data or {}):
+                out["data"][tail] = data[tail]
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -383,18 +414,25 @@ def ingest_batch(tenant_id: str, name: str, body: List[IngestEntryRequest]):
     return out
 
 @app.get("/api/v1/tenants/{tenant_id}/tables/{name}/entries")
-def list_entries(tenant_id: str, name: str, limit: int = Query(200, ge=1, le=1000)):
+def list_entries(tenant_id: str, name: str,
+                 limit: int = Query(200, ge=1, le=1000),
+                 fields: Optional[str] = Query(None,
+                     description="Comma-separated field list to project. "
+                                 "Use `data.<key>` for nested data keys. "
+                                 "Default = all fields.")):
     t = tenant(tenant_id)
     rows = [e for (tn, _rk), e in t["entries"].items() if tn == name and not e.get("deleted")]
     rows.sort(key=lambda e: e["createdAt"], reverse=True)
-    return rows[:limit]
+    rows = rows[:limit]
+    return [project(r, fields) for r in rows]
 
 @app.get("/api/v1/tenants/{tenant_id}/tables/{name}/entries/{record_key}")
-def get_entry(tenant_id: str, name: str, record_key: str):
+def get_entry(tenant_id: str, name: str, record_key: str,
+              fields: Optional[str] = Query(None)):
     e = tenant(tenant_id)["entries"].get((name, record_key))
     if not e or e.get("deleted"):
         raise HTTPException(status_code=404, detail="Entry not found")
-    return e
+    return project(e, fields)
 
 @app.delete("/api/v1/tenants/{tenant_id}/tables/{name}/entries/{record_key}", status_code=204)
 def delete_entry(tenant_id: str, name: str, record_key: str):

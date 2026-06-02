@@ -1,6 +1,27 @@
 server:
+  # Port — override via env. Default 8081 (HTTP). When SSL is enabled the
+  # convention is to flip this to 8443 via VALKEYRY_CONFIG_PORT=8443.
   port: ${VALKEYRY_CONFIG_PORT:8081}
+  address: ${VALKEYRY_CONFIG_BIND:0.0.0.0}
   shutdown: graceful
+  # ----- HTTPS / TLS -----
+  # Two ways to provide a certificate (pick one, leave the rest blank):
+  #   A. **Bundle PEM**: VALKEYRY_SSL_CERT_PEM points at a single .pem holding
+  #      cert (+ optional chain) and VALKEYRY_SSL_KEY_PEM at the private key.
+  #      Spring Boot 3+ reads PEMs natively — no keystore conversion required.
+  #   B. **Separate CRT + KEY**: same env vars, just two files
+  #      (.crt + .key). Mechanically identical to (A) — Spring decodes either.
+  # Enable with VALKEYRY_SSL_ENABLED=true. Leave false (default) for HTTP.
+  ssl:
+    enabled: ${VALKEYRY_SSL_ENABLED:false}
+    certificate:             ${VALKEYRY_SSL_CERT_PEM:}
+    certificate-private-key: ${VALKEYRY_SSL_KEY_PEM:}
+    # Optional — for mTLS client-cert verification.
+    trust-certificate: ${VALKEYRY_SSL_TRUST_PEM:}
+    client-auth:       ${VALKEYRY_SSL_CLIENT_AUTH:none}
+    protocol:          TLS
+    enabled-protocols: TLSv1.2,TLSv1.3
+
 
 spring:
   application:
@@ -60,16 +81,24 @@ valkeyry:
       initial-backoff-ms: ${VALKEYRY_AUDIT_WEBHOOK_BACKOFF_MS:200}
 
 management:
+  server:
+    port: ${VALKEYRY_MGMT_PORT:${VALKEYRY_CONFIG_PORT:8081}}
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
   endpoint:
     health:
+      probes:
+        enabled: true
       show-details: when-authorized
   health:
     r2dbc:
       enabled: true
+      livenessstate:
+        enabled: true
+      readinessstate:
+        enabled: true
 
 logging:
   level:

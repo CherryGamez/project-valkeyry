@@ -1,0 +1,240 @@
+{{/*
+The chart bundles every K8s object into a single template so values.yaml is
+the single source of truth. Each section is fenced so removing a value
+(e.g. disabling autoscaling) cleanly drops the matching resource.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vc.fullname" . }}-env
+  labels: {{ include "vc.labels" . | nindent 4 }}
+data:
+  VALKEYRY_CONFIG_PORT:    {{ .Values.service.httpPort | quote }}
+  VALKEYRY_CONFIG_BIND:    "0.0.0.0"
+  VALKEYRY_MGMT_PORT:      {{ .Values.service.managementPort | quote }}
+  VALKEYRY_SSL_ENABLED:    {{ .Values.tls.enabled | quote }}
+  {{- if .Values.tls.enabled }}
+  VALKEYRY_SSL_CERT_PEM:   "/etc/valkeyry/tls/tls.crt"
+  VALKEYRY_SSL_KEY_PEM:    "/etc/valkeyry/tls/tls.key"
+  {{- end }}
+  VALKEYRY_OIDC_ISSUER:    {{ .Values.auth.oidc.issuer | quote }}
+  {{- if .Values.auth.ldap.enabled }}
+  VALKEYRY_LDAP_URL:       {{ .Values.auth.ldap.url | quote }}
+  VALKEYRY_LDAP_BASE:      {{ .Values.auth.ldap.baseDn | quote }}
+  VALKEYRY_LDAP_USER_DN:   {{ .Values.auth.ldap.userDnPattern | quote }}
+  {{- end }}
+  {{- if .Values.auth.apiKeys.csv }}
+  VALKEYRY_API_KEYS:       {{ .Values.auth.apiKeys.csv | quote }}
+  {{- end }}
+  VALKEYRY_CONFIG_R2DBC_URL: {{ .Values.postgres.url | quote }}
+  VALKEYRY_CONFIG_JDBC_URL:  {{ .Values.postgres.jdbcUrl | quote }}
+  VALKEYRY_CONFIG_DB_USER:   {{ .Values.postgres.user | quote }}
+{{- if not .Values.postgres.existingSecretName }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "vc.fullname" . }}-db
+  labels: {{ include "vc.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  VALKEYRY_CONFIG_DB_PASS: {{ required "postgres.password is required when existingSecretName is not set" .Values.postgres.password | quote }}
+{{- end }}
+{{- if and .Values.tls.enabled .Values.tls.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "vc.fullname" . }}-cert
+  labels: {{ include "vc.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.secretName }}
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerKind }}
+    name: {{ .Values.tls.certManager.issuerName }}
+  commonName: {{ .Values.tls.certManager.commonName }}
+  dnsNames: {{ toYaml .Values.tls.certManager.dnsNames | nindent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vc.fullname" . }}
+  labels: {{ include "vc.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vc.fullname" . }}
+  labels: {{ include "vc.labels" . | nindent 4 }}
+  {{- if .Values.monitoring.prometheusScrape }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path:   "/actuator/prometheus"
+    prometheus.io/port:   {{ .Values.service.managementPort | quote }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{ include "vc.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: {{ ternary "https" "http" .Values.tls.enabled }}
+      port: {{ .Values.service.httpPort }}
+      targetPort: app
+    - name: management
+      port: {{ .Values.service.managementPort }}
+      targetPort: management
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vc.fullname" . }}
+  labels: {{ include "vc.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{ include "vc.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{ include "vc.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vc.fullname" . }}
+      terminationGracePeriodSeconds: 60
+      securityContext: {{ toYaml .Values.securityContext | nindent 8 }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range $c := . }}
+        - {{ toYaml $c | nindent 10 | trim }}
+          labelSelector:
+            matchLabels: {{ include "vc.selectorLabels" $ | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: app,        containerPort: {{ .Values.service.httpPort }} }
+            - { name: management, containerPort: {{ .Values.service.managementPort }} }
+          envFrom:
+            - configMapRef: { name: {{ include "vc.fullname" . }}-env }
+            - secretRef:
+                name: {{ default (printf "%s-db" (include "vc.fullname" .)) .Values.postgres.existingSecretName }}
+          {{- if .Values.tls.enabled }}
+          volumeMounts:
+            - { name: tls, mountPath: /etc/valkeyry/tls, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          {{- else }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop: { exec: { command: ["sh","-c","sleep 10"] } }
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+          securityContext: {{ toYaml .Values.containerSecurityContext | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.tls.enabled }}
+        - name: tls
+          secret: { secretName: {{ .Values.tls.secretName }} }
+        {{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: {{ include "vc.fullname" . }}, labels: {{ include "vc.labels" . | nindent 4 }} }
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{ include "vc.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: {{ include "vc.fullname" . }}, labels: {{ include "vc.labels" . | nindent 4 }} }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "vc.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }} }
+{{- end }}
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "vc.fullname" . }}
+  labels: {{ include "vc.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.ingress.host }}]
+      secretName: {{ include "vc.fullname" . }}-ingress-cert
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "vc.fullname" . }}
+                port: { name: {{ ternary "https" "http" .Values.tls.enabled }} }
+{{- end }}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "vc.fullname" . }}
+  labels:
+    {{- include "vc.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels: {{ include "vc.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: management
+      path: /actuator/prometheus
+      interval: 30s
+{{- end }}

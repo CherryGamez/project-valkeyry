@@ -1,0 +1,191 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Namespace
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: valkeyry
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-secret config — port, bind address, OIDC issuer, log levels, …
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: valkeyry-config-env, namespace: valkeyry }
+data:
+  VALKEYRY_CONFIG_PORT: "8443"
+  VALKEYRY_CONFIG_BIND: "0.0.0.0"
+  VALKEYRY_SSL_ENABLED: "true"
+  VALKEYRY_SSL_CERT_PEM: "/etc/valkeyry/tls/tls.crt"
+  VALKEYRY_SSL_KEY_PEM:  "/etc/valkeyry/tls/tls.key"
+  VALKEYRY_MGMT_PORT:    "8444"
+  VALKEYRY_OIDC_ISSUER:  "https://oidc.acme.io/realms/valkeyry"
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets — replace the placeholder values OR generate via External-Secrets / Vault.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata: { name: valkeyry-db, namespace: valkeyry }
+type: Opaque
+stringData:
+  VALKEYRY_CONFIG_R2DBC_URL: "r2dbc:postgresql://postgres.valkeyry:5432/valkeyry_config"
+  VALKEYRY_CONFIG_JDBC_URL:  "jdbc:postgresql://postgres.valkeyry:5432/valkeyry_config"
+  VALKEYRY_CONFIG_DB_USER:   "valkeyry"
+  VALKEYRY_CONFIG_DB_PASS:   "replace-me-via-vault"
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: valkeyry-tls, namespace: valkeyry }
+type: kubernetes.io/tls
+data:
+  # Replace with `cat tls.crt | base64 -w0` and `cat tls.key | base64 -w0`,
+  # or let cert-manager populate this Secret via a Certificate resource.
+  tls.crt: ""
+  tls.key: ""
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ServiceAccount, Service, Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: valkeyry-config, namespace: valkeyry }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkeyry-config
+  namespace: valkeyry
+  labels: { app.kubernetes.io/name: valkeyry-config }
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path:   "/actuator/prometheus"
+    prometheus.io/port:   "8444"
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: valkeyry-config }
+  ports:
+    - { name: https,      port: 8443, targetPort: https }
+    - { name: management, port: 8444, targetPort: management }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkeyry-config
+  namespace: valkeyry
+  labels: { app.kubernetes.io/name: valkeyry-config }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: valkeyry-config }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: valkeyry-config }
+    spec:
+      serviceAccountName: valkeyry-config
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: valkeyry-config }
+      containers:
+        - name: app
+          image: ghcr.io/valkeyry/valkeyry-config:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: https,      containerPort: 8443 }
+            - { name: management, containerPort: 8444 }
+          envFrom:
+            - configMapRef: { name: valkeyry-config-env }
+            - secretRef:    { name: valkeyry-db }
+          volumeMounts:
+            - { name: tls,  mountPath: /etc/valkeyry/tls, readOnly: true }
+            - { name: tmp,  mountPath: /tmp }
+          # Spring Actuator's liveness and readiness groups (probes.enabled=true).
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness,  port: management, scheme: HTTP }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: management, scheme: HTTP }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          # Block traffic during graceful shutdown so the rolling update is loss-free.
+          lifecycle:
+            preStop:
+              exec: { command: ["sh","-c","sleep 10"] }
+          resources:
+            requests: { cpu: "200m", memory: "512Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: tls
+          secret: { secretName: valkeyry-tls }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: valkeyry-config, namespace: valkeyry }
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: valkeyry-config }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: valkeyry-config, namespace: valkeyry }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: valkeyry-config
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 60 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: valkeyry-config
+  namespace: valkeyry
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [valkeyry-config.example.com]
+      secretName: valkeyry-config-cert
+  rules:
+    - host: valkeyry-config.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: valkeyry-config
+                port: { name: https }

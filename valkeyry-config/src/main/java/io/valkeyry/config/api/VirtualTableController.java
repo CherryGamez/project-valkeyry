@@ -197,28 +197,33 @@ public class VirtualTableController {
     }
 
     @GetMapping("/tables/{name}/entries")
-    @Operation(summary = "List entries in a table (paged, latest version per record)")
-    public Flux<EntryView> browse(@PathVariable String tenantId,
-                                  @PathVariable("name") String tableName,
-                                  @Parameter(description = "Page size, 1-1000") @RequestParam(defaultValue = "50")  int limit,
-                                  @Parameter(description = "Number of rows to skip")  @RequestParam(defaultValue = "0")   int offset,
-                                  Authentication auth) {
+    @Operation(summary = "List entries in a table (paged, latest version per record)",
+               description = "Use the `fields=` query param to project only the columns you need — e.g. `?fields=recordKey,data.role`. Default is every field.")
+    public Flux<JsonNode> browse(@PathVariable String tenantId,
+                                 @PathVariable("name") String tableName,
+                                 @Parameter(description = "Page size, 1-1000") @RequestParam(defaultValue = "50")  int limit,
+                                 @Parameter(description = "Number of rows to skip")  @RequestParam(defaultValue = "0")   int offset,
+                                 @Parameter(description = "CSV field whitelist — use dotted `data.<key>` for nested keys") @RequestParam(required = false) String fields,
+                                 Authentication auth) {
         return guard.check(auth, tenantId)
-                .thenMany(service.browse(tenantId, tableName, sane(limit, 1000), Math.max(0, offset)));
+                .thenMany(service.browse(tenantId, tableName, sane(limit, 1000), Math.max(0, offset)))
+                .map(v -> FieldProjection.apply(mapper.valueToTree(v), fields, mapper));
     }
 
     @PostMapping("/tables/{name}/search")
     @Operation(summary = "Filter entries by JSON-path / JSONB criteria",
-               description = "Body is a free-form JSON object describing the predicate (e.g. `{ \"equals\": { \"role\": \"admin\" } }`).")
-    public Flux<EntryView> search(@PathVariable String tenantId,
-                                  @PathVariable("name") String tableName,
-                                  @RequestBody(required = false) JsonNode criteria,
-                                  @RequestParam(defaultValue = "50") int limit,
-                                  @RequestParam(defaultValue = "0")  int offset,
-                                  Authentication auth) {
+               description = "Body is a free-form JSON object describing the predicate (e.g. `{ \"equals\": { \"role\": \"admin\" } }`). Pair with `?fields=` to project only specific columns.")
+    public Flux<JsonNode> search(@PathVariable String tenantId,
+                                 @PathVariable("name") String tableName,
+                                 @RequestBody(required = false) JsonNode criteria,
+                                 @RequestParam(defaultValue = "50") int limit,
+                                 @RequestParam(defaultValue = "0")  int offset,
+                                 @RequestParam(required = false) String fields,
+                                 Authentication auth) {
         JsonNode body = (criteria == null) ? mapper.createObjectNode() : criteria;
         return guard.check(auth, tenantId)
-                .thenMany(service.search(tenantId, tableName, body, sane(limit, 1000), Math.max(0, offset)));
+                .thenMany(service.search(tenantId, tableName, body, sane(limit, 1000), Math.max(0, offset)))
+                .map(v -> FieldProjection.apply(mapper.valueToTree(v), fields, mapper));
     }
 
     private static int sane(int v, int max) {
