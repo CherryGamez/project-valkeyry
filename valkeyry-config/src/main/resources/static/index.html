@@ -452,6 +452,17 @@
                        placeholder="customers"
                        class="ios-input font-mono text-[14px]"/>
             </label>
+            <div class="grid gap-1.5">
+                <span class="section-label">Schema Gallery <span class="text-ink-500 normal-case font-normal">(click to load — demonstrates every supported widget)</span></span>
+                <div id="ct-gallery" data-testid="ct-gallery" class="flex flex-wrap gap-2">
+                    <button type="button" onclick="loadSchemaTemplate('simple')"      data-testid="gallery-simple"      class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Simple (string + email + boolean)</button>
+                    <button type="button" onclick="loadSchemaTemplate('user')"        data-testid="gallery-user"        class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">User profile (dropdown + checkbox + multi-select)</button>
+                    <button type="button" onclick="loadSchemaTemplate('product')"     data-testid="gallery-product"     class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Product (nested object + numeric range)</button>
+                    <button type="button" onclick="loadSchemaTemplate('flag')"        data-testid="gallery-flag"        class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Feature flag (boolean + tags)</button>
+                    <button type="button" onclick="loadSchemaTemplate('event')"       data-testid="gallery-event"       class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Event (date-time + enum + integer)</button>
+                    <button type="button" onclick="loadSchemaTemplate('discriminated')" data-testid="gallery-discriminated" class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Discriminated (oneOf picker)</button>
+                </div>
+            </div>
             <label class="grid gap-1.5">
                 <span class="section-label">JSON Schema</span>
                 <textarea id="ct-schema" rows="14" required data-testid="ct-schema-input"
@@ -910,22 +921,41 @@ async function selectTable(name) {
                   class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
         </div>
         ${schema ? `<details class="mb-4"><summary class="text-[12px] text-ink-700 cursor-pointer hover:text-ios-blue">View JSON Schema</summary><pre class="json-box mt-2" data-testid="schema-display">${escapeHtml(JSON.stringify(schema, null, 2))}</pre></details>` : ''}
+
+        <div class="flex items-center gap-2 mb-3" data-testid="entry-mode-toggle">
+          <span class="section-label">Editor mode:</span>
+          <button type="button" id="mode-form-btn" data-testid="mode-form-btn"
+                  onclick="switchEntryMode('form')"
+                  class="press text-[12px] px-3 py-1.5 rounded-pill border border-hairline bg-white">Form</button>
+          <button type="button" id="mode-json-btn" data-testid="mode-json-btn"
+                  onclick="switchEntryMode('json')"
+                  class="press text-[12px] px-3 py-1.5 rounded-pill border border-hairline">Raw JSON (advanced)</button>
+        </div>
+
         <form id="entry-form" onsubmit="event.preventDefault(); ingestEntry('${escapeHtml(name)}')"
-              class="grid grid-cols-[200px_1fr_auto] gap-3 items-start" data-testid="entry-form">
+              class="grid gap-3" data-testid="entry-form">
           <label class="grid gap-1.5">
             <span class="section-label">Record key</span>
             <input id="entry-key" required placeholder="alice@acme.io" data-testid="entry-key-input"
-                   class="ios-input font-mono text-[13px]"/>
+                   class="ios-input font-mono text-[13px] max-w-[420px]"/>
           </label>
-          <label class="grid gap-1.5">
+
+          <!-- Schema-driven form fields (visible by default) -->
+          <div id="entry-form-fields" data-testid="entry-form-fields" class="grid gap-3"></div>
+
+          <!-- Raw JSON textarea (hidden by default, toggled via switchEntryMode) -->
+          <label class="grid gap-1.5 hidden" id="entry-data-wrap">
             <span class="section-label">Data (JSON)</span>
-            <textarea id="entry-data" rows="6" required data-testid="entry-data-input"
+            <textarea id="entry-data" rows="8" data-testid="entry-data-input"
                       class="ios-input font-mono text-[12px]" style="background:#F9F9FB;">${schema ? escapeHtml(sampleFromSchema(schema)) : '{}'}</textarea>
           </label>
-          <button type="submit" data-testid="entry-submit-btn"
-                  class="btn-primary press self-end px-5 py-2.5 text-[13px]">
-            Save entry
-          </button>
+
+          <div class="flex justify-end">
+            <button type="submit" data-testid="entry-submit-btn"
+                    class="btn-primary press px-5 py-2.5 text-[13px]">
+              Save entry
+            </button>
+          </div>
         </form>
         <div id="entry-error" data-testid="entry-error" class="hidden mt-3"></div>
       </div>
@@ -936,6 +966,15 @@ async function selectTable(name) {
       </div>`;
     document.getElementById('tables-content').innerHTML = html;
     htmx.process(document.getElementById('tables-content'));
+    // Build the schema-driven form fields immediately so the user sees widgets.
+    window.__currentSchema = schema;
+    if (schema && schema.type === 'object') {
+        renderSchemaForm(schema, document.getElementById('entry-form-fields'));
+        switchEntryMode('form');
+    } else {
+        // No schema → fall back to raw-JSON editor.
+        switchEntryMode('json');
+    }
     loadEntries(name);
     window.__currentTable = name;
 }
@@ -952,6 +991,472 @@ function sampleFromSchema(schema) {
         out[k] = ({ string:'', number:0, integer:0, boolean:false, object:{}, array:[] })[t] ?? null;
     }
     return JSON.stringify(out, null, 2);
+}
+
+// =====================================================================
+// Schema-driven form renderer
+// =====================================================================
+// Supports the full set of widgets the user asked for:
+//   - string                                       → text input
+//   - string + format: date|date-time|email|uri|password  → typed input
+//   - string + enum                                → <select> dropdown
+//   - boolean                                      → checkbox
+//   - integer | number (+ minimum/maximum)         → number input (with bounds)
+//   - array of strings                             → comma-separated input
+//   - array + items.enum                           → checkbox-group multi-select
+//   - object (nested)                              → recursive sub-fieldset
+//   - oneOf (discriminated)                        → variant picker + sub-form
+// Everything else falls back to a free-form JSON textarea for that single field.
+
+function renderSchemaForm(schema, container, valuePath, currentValue) {
+    container.innerHTML = '';
+    valuePath = valuePath || '';
+    const props = (schema && schema.properties) || {};
+    const required = new Set(schema && Array.isArray(schema.required) ? schema.required : []);
+    Object.entries(props).forEach(([key, def]) => {
+        const fld = buildField(key, def, required.has(key), valuePath, currentValue && currentValue[key]);
+        if (fld) container.appendChild(fld);
+    });
+}
+
+function buildField(key, def, isRequired, parentPath, currentValue) {
+    const path  = parentPath ? parentPath + '.' + key : key;
+    const label = document.createElement('label');
+    label.className = 'grid gap-1.5';
+    label.dataset.fieldPath = path;
+    label.dataset.fieldKey  = key;
+
+    const title = document.createElement('span');
+    title.className = 'section-label';
+    title.innerHTML = escapeHtml(def.title || key) +
+        (isRequired ? ' <span class="text-ios-red">*</span>' : '') +
+        (def.description ? ' <span class="text-ink-500 normal-case font-normal">— ' + escapeHtml(def.description) + '</span>' : '');
+    label.appendChild(title);
+
+    // --- oneOf / anyOf : discriminated picker -------------------------------
+    const variants = def.oneOf || def.anyOf;
+    if (Array.isArray(variants) && variants.length) {
+        const picker = document.createElement('select');
+        picker.className = 'ios-input';
+        picker.dataset.testid = 'field-' + path + '-variant';
+        variants.forEach((v, i) => {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = v.title || ('Variant ' + (i + 1));
+            picker.appendChild(opt);
+        });
+        const sub = document.createElement('div');
+        sub.className = 'pl-3 border-l-2 border-hairline grid gap-3';
+        const rebuild = () => {
+            const variant = variants[Number(picker.value) || 0];
+            // Treat variant as a sub-schema (object expected; otherwise wrap)
+            sub.innerHTML = '';
+            renderSchemaForm(variant.type === 'object' ? variant : { type:'object', properties:{ value: variant }, required:['value'] },
+                             sub, path, currentValue);
+        };
+        picker.addEventListener('change', rebuild);
+        label.appendChild(picker);
+        label.appendChild(sub);
+        rebuild();
+        label.dataset.fieldKind = 'oneOf';
+        label.__variants = variants;
+        label.__picker  = picker;
+        label.__sub     = sub;
+        return label;
+    }
+
+    const t = def.type;
+
+    // --- boolean → checkbox -------------------------------------------------
+    if (t === 'boolean') {
+        const wrap = document.createElement('div');
+        wrap.className = 'flex items-center gap-2';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'h-4 w-4';
+        cb.dataset.testid = 'field-' + path;
+        cb.checked = currentValue === true;
+        wrap.appendChild(cb);
+        const hint = document.createElement('span');
+        hint.className = 'text-[12px] text-ink-500';
+        hint.textContent = def.description ? '' : 'check to enable';
+        wrap.appendChild(hint);
+        label.appendChild(wrap);
+        label.dataset.fieldKind = 'boolean';
+        label.__input = cb;
+        return label;
+    }
+
+    // --- string + enum → dropdown ------------------------------------------
+    if (t === 'string' && Array.isArray(def.enum)) {
+        const sel = document.createElement('select');
+        sel.className = 'ios-input';
+        sel.dataset.testid = 'field-' + path;
+        if (!isRequired) {
+            const blank = document.createElement('option');
+            blank.value = ''; blank.textContent = '— (none) —';
+            sel.appendChild(blank);
+        }
+        def.enum.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = String(v); opt.textContent = String(v);
+            sel.appendChild(opt);
+        });
+        if (currentValue !== undefined && currentValue !== null) sel.value = String(currentValue);
+        else if (def.default !== undefined) sel.value = String(def.default);
+        label.appendChild(sel);
+        label.dataset.fieldKind = 'enum';
+        label.__input = sel;
+        return label;
+    }
+
+    // --- array + items.enum + (optional uniqueItems) → multi-select checkbox group
+    if (t === 'array' && def.items && Array.isArray(def.items.enum)) {
+        const group = document.createElement('div');
+        group.className = 'grid grid-cols-2 gap-1.5 p-2 rounded-card border border-hairline bg-white';
+        group.dataset.testid = 'field-' + path;
+        const current = new Set(Array.isArray(currentValue) ? currentValue.map(String) : []);
+        def.items.enum.forEach(v => {
+            const row = document.createElement('label');
+            row.className = 'flex items-center gap-2 text-[13px]';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = String(v);
+            cb.dataset.testid = 'field-' + path + '-opt-' + v;
+            cb.className = 'h-4 w-4';
+            cb.checked = current.has(String(v));
+            row.appendChild(cb);
+            const sp = document.createElement('span');
+            sp.textContent = String(v);
+            row.appendChild(sp);
+            group.appendChild(row);
+        });
+        label.appendChild(group);
+        label.dataset.fieldKind = 'multi-enum';
+        label.__group = group;
+        return label;
+    }
+
+    // --- array of primitives → comma-separated input -----------------------
+    if (t === 'array') {
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'ios-input font-mono text-[13px]';
+        inp.dataset.testid = 'field-' + path;
+        inp.placeholder = 'comma-separated values, e.g. red,green,blue';
+        if (Array.isArray(currentValue)) inp.value = currentValue.join(',');
+        label.appendChild(inp);
+        const hint = document.createElement('span');
+        hint.className = 'text-[11px] text-ink-500';
+        hint.textContent = 'Array of ' + ((def.items && def.items.type) || 'string') + ' — comma-separated.';
+        label.appendChild(hint);
+        label.dataset.fieldKind = 'array-csv';
+        label.__input = inp;
+        label.__itemType = (def.items && def.items.type) || 'string';
+        return label;
+    }
+
+    // --- nested object → recursive sub-form --------------------------------
+    if (t === 'object') {
+        const sub = document.createElement('div');
+        sub.className = 'pl-3 border-l-2 border-hairline grid gap-3 py-1';
+        sub.dataset.testid = 'field-' + path + '-object';
+        renderSchemaForm(def, sub, path, currentValue || {});
+        label.appendChild(sub);
+        label.dataset.fieldKind = 'object';
+        label.__sub = sub;
+        label.__schema = def;
+        return label;
+    }
+
+    // --- integer / number --------------------------------------------------
+    if (t === 'integer' || t === 'number') {
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.className = 'ios-input font-mono text-[13px] max-w-[280px]';
+        inp.dataset.testid = 'field-' + path;
+        if (t === 'integer') inp.step = '1'; else if (def.multipleOf) inp.step = String(def.multipleOf); else inp.step = 'any';
+        if (def.minimum !== undefined) inp.min = String(def.minimum);
+        if (def.maximum !== undefined) inp.max = String(def.maximum);
+        if (currentValue !== undefined && currentValue !== null) inp.value = String(currentValue);
+        else if (def.default !== undefined) inp.value = String(def.default);
+        label.appendChild(inp);
+        if (def.minimum !== undefined || def.maximum !== undefined) {
+            const hint = document.createElement('span');
+            hint.className = 'text-[11px] text-ink-500';
+            hint.textContent =
+                (def.minimum !== undefined ? 'min ' + def.minimum : '') +
+                (def.minimum !== undefined && def.maximum !== undefined ? ' · ' : '') +
+                (def.maximum !== undefined ? 'max ' + def.maximum : '');
+            label.appendChild(hint);
+        }
+        label.dataset.fieldKind = t;
+        label.__input = inp;
+        return label;
+    }
+
+    // --- string with format ------------------------------------------------
+    if (t === 'string' || t === undefined) {
+        const inp = document.createElement('input');
+        const fmt = def.format || '';
+        if      (fmt === 'date')      inp.type = 'date';
+        else if (fmt === 'date-time') inp.type = 'datetime-local';
+        else if (fmt === 'time')      inp.type = 'time';
+        else if (fmt === 'email')     inp.type = 'email';
+        else if (fmt === 'uri'  || fmt === 'url') inp.type = 'url';
+        else if (fmt === 'password')  inp.type = 'password';
+        else                          inp.type = 'text';
+        inp.className = 'ios-input';
+        inp.dataset.testid = 'field-' + path;
+        if (def.pattern)   inp.pattern = def.pattern;
+        if (def.minLength) inp.minLength = def.minLength;
+        if (def.maxLength) inp.maxLength = def.maxLength;
+        if (currentValue !== undefined && currentValue !== null) inp.value = String(currentValue);
+        else if (def.default !== undefined) inp.value = String(def.default);
+        if (def.examples && Array.isArray(def.examples) && def.examples.length) inp.placeholder = String(def.examples[0]);
+        label.appendChild(inp);
+        label.dataset.fieldKind = 'string';
+        label.__input = inp;
+        return label;
+    }
+
+    // --- fallback : free-form JSON textarea for this field -----------------
+    const ta = document.createElement('textarea');
+    ta.rows = 3;
+    ta.className = 'ios-input font-mono text-[12px]';
+    ta.dataset.testid = 'field-' + path;
+    ta.placeholder = 'Raw JSON for ' + key;
+    if (currentValue !== undefined) ta.value = JSON.stringify(currentValue, null, 2);
+    label.appendChild(ta);
+    label.dataset.fieldKind = 'json';
+    label.__input = ta;
+    return label;
+}
+
+// Walk a rendered form back into a JS object. Mirrors renderSchemaForm.
+function collectFormValues(container) {
+    const out = {};
+    Array.from(container.children).forEach(label => {
+        const key  = label.dataset.fieldKey;
+        const kind = label.dataset.fieldKind;
+        if (!key || !kind) return;
+        switch (kind) {
+            case 'boolean':
+                out[key] = !!label.__input.checked;
+                break;
+            case 'enum': {
+                const v = label.__input.value;
+                if (v !== '') out[key] = v;
+                break;
+            }
+            case 'multi-enum':
+                out[key] = Array.from(label.__group.querySelectorAll('input[type=checkbox]:checked'))
+                                .map(cb => cb.value);
+                break;
+            case 'array-csv': {
+                const raw = (label.__input.value || '').trim();
+                if (raw === '') { out[key] = []; break; }
+                const parts = raw.split(',').map(s => s.trim()).filter(s => s !== '');
+                if (label.__itemType === 'integer') out[key] = parts.map(s => parseInt(s, 10));
+                else if (label.__itemType === 'number') out[key] = parts.map(Number);
+                else if (label.__itemType === 'boolean') out[key] = parts.map(s => s === 'true' || s === '1');
+                else out[key] = parts;
+                break;
+            }
+            case 'integer': {
+                const v = label.__input.value;
+                if (v !== '') out[key] = parseInt(v, 10);
+                break;
+            }
+            case 'number': {
+                const v = label.__input.value;
+                if (v !== '') out[key] = Number(v);
+                break;
+            }
+            case 'object':
+                out[key] = collectFormValues(label.__sub);
+                break;
+            case 'oneOf': {
+                const idx = Number(label.__picker.value) || 0;
+                const variant = label.__variants[idx];
+                const subVal  = collectFormValues(label.__sub);
+                // If we wrapped a non-object variant as { value: ... } above, unwrap it.
+                if (variant.type !== 'object' && 'value' in subVal) out[key] = subVal.value;
+                else out[key] = subVal;
+                break;
+            }
+            case 'string': {
+                const v = label.__input.value;
+                if (v !== '') out[key] = v;
+                break;
+            }
+            case 'json': {
+                const v = label.__input.value;
+                if (v.trim() === '') break;
+                try { out[key] = JSON.parse(v); }
+                catch { out[key] = v; }
+                break;
+            }
+            default:
+                break;
+        }
+    });
+    return out;
+}
+
+// =====================================================================
+// Editor-mode toggle (Form ⇄ Raw JSON)
+// =====================================================================
+function switchEntryMode(mode) {
+    const fields = document.getElementById('entry-form-fields');
+    const wrap   = document.getElementById('entry-data-wrap');
+    const ta     = document.getElementById('entry-data');
+    const bForm  = document.getElementById('mode-form-btn');
+    const bJson  = document.getElementById('mode-json-btn');
+    if (!fields || !wrap || !ta) return;
+    if (mode === 'json') {
+        // Going Form → JSON: copy the form's current state into the textarea.
+        try { ta.value = JSON.stringify(collectFormValues(fields), null, 2); } catch {/* ignore */}
+        fields.classList.add('hidden');
+        wrap.classList.remove('hidden');
+        ta.required = true;
+        bForm.classList.remove('bg-white'); bJson.classList.add('bg-white');
+    } else {
+        // Going JSON → Form: try to parse the textarea back into the form widgets.
+        if (window.__currentSchema) {
+            try {
+                const parsed = JSON.parse(ta.value || '{}');
+                renderSchemaForm(window.__currentSchema, fields, '', parsed);
+            } catch {/* keep old form state */}
+        }
+        fields.classList.remove('hidden');
+        wrap.classList.add('hidden');
+        ta.required = false;
+        bJson.classList.remove('bg-white'); bForm.classList.add('bg-white');
+    }
+    window.__entryMode = mode;
+}
+
+// =====================================================================
+// Schema Gallery — clickable templates demonstrating every widget
+// =====================================================================
+const SCHEMA_TEMPLATES = {
+    simple: {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Customer",
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+            "email":    { "type": "string", "format": "email", "title": "E-mail" },
+            "fullName": { "type": "string", "title": "Full name" },
+            "active":   { "type": "boolean", "title": "Active" }
+        },
+        "additionalProperties": false
+    },
+    user: {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "User profile",
+        "type": "object",
+        "required": ["email", "role"],
+        "properties": {
+            "email":     { "type": "string", "format": "email",  "title": "E-mail" },
+            "role":      { "type": "string", "title": "Role (dropdown)",
+                           "enum": ["viewer", "editor", "admin", "owner"], "default": "viewer" },
+            "active":    { "type": "boolean", "title": "Account active", "default": true },
+            "tags":      { "type": "array", "title": "Capabilities (multi-select)",
+                           "uniqueItems": true,
+                           "items": { "type": "string",
+                                      "enum": ["read","write","approve","deploy","billing","support"] } },
+            "joinedAt":  { "type": "string", "format": "date", "title": "Joined on" }
+        },
+        "additionalProperties": false
+    },
+    product: {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Product",
+        "type": "object",
+        "required": ["sku", "price"],
+        "properties": {
+            "sku":        { "type": "string", "title": "SKU", "pattern": "^[A-Z0-9-]{3,32}$" },
+            "name":       { "type": "string", "title": "Display name" },
+            "price":      { "type": "number", "title": "Unit price", "minimum": 0, "maximum": 100000 },
+            "stock":      { "type": "integer", "title": "Stock on hand", "minimum": 0 },
+            "dimensions": { "type": "object", "title": "Dimensions (nested)",
+                            "properties": {
+                                "length": { "type": "number", "title": "Length (cm)", "minimum": 0 },
+                                "width":  { "type": "number", "title": "Width (cm)",  "minimum": 0 },
+                                "height": { "type": "number", "title": "Height (cm)", "minimum": 0 }
+                            } },
+            "discontinued": { "type": "boolean", "title": "Discontinued" }
+        },
+        "additionalProperties": false
+    },
+    flag: {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Feature flag",
+        "type": "object",
+        "required": ["key", "enabled"],
+        "properties": {
+            "key":     { "type": "string", "title": "Flag key", "pattern": "^[a-z0-9_.-]+$" },
+            "enabled": { "type": "boolean", "title": "Enabled", "default": false },
+            "rolloutPercent": { "type": "integer", "title": "Rollout %",
+                                "minimum": 0, "maximum": 100, "default": 0 },
+            "audiences": { "type": "array", "title": "Audiences (multi-select)",
+                           "uniqueItems": true,
+                           "items": { "type": "string",
+                                      "enum": ["internal","beta","early-access","ga","enterprise"] } }
+        },
+        "additionalProperties": false
+    },
+    event: {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Event",
+        "type": "object",
+        "required": ["title", "startsAt", "severity"],
+        "properties": {
+            "title":    { "type": "string", "title": "Title", "minLength": 3, "maxLength": 120 },
+            "startsAt": { "type": "string", "format": "date-time", "title": "Starts at" },
+            "endsAt":   { "type": "string", "format": "date-time", "title": "Ends at" },
+            "severity": { "type": "string", "title": "Severity (dropdown)",
+                          "enum": ["info","warning","critical"], "default": "info" },
+            "expectedAttendees": { "type": "integer", "title": "Expected attendees",
+                                   "minimum": 0, "maximum": 100000 }
+        },
+        "additionalProperties": false
+    },
+    discriminated: {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Notification channel",
+        "type": "object",
+        "required": ["name", "target"],
+        "properties": {
+            "name":   { "type": "string", "title": "Channel name" },
+            "target": { "title": "Target (oneOf picker)",
+                        "oneOf": [
+                            { "title": "Email", "type": "object", "required": ["email"],
+                              "properties": { "email": { "type": "string", "format": "email", "title": "Address" } } },
+                            { "title": "Webhook", "type": "object", "required": ["url"],
+                              "properties": { "url":    { "type": "string", "format": "uri", "title": "URL" },
+                                              "secret": { "type": "string", "title": "HMAC secret", "format": "password" } } },
+                            { "title": "Slack", "type": "object", "required": ["channel"],
+                              "properties": { "channel": { "type": "string", "title": "#channel" } } }
+                        ] }
+        },
+        "additionalProperties": false
+    }
+};
+
+function loadSchemaTemplate(key) {
+    const tpl = SCHEMA_TEMPLATES[key];
+    if (!tpl) return;
+    document.getElementById('ct-schema').value = JSON.stringify(tpl, null, 2);
+    if (!document.getElementById('ct-name').value) {
+        document.getElementById('ct-name').value = ({
+            simple:'customers', user:'users', product:'products',
+            flag:'feature_flags', event:'events', discriminated:'channels'
+        })[key] || key;
+    }
+    toast('Loaded "' + (tpl.title || key) + '" template');
 }
 
 // ============== Ingest / update an entry ==============
