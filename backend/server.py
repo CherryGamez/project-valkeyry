@@ -456,6 +456,41 @@ def delete_entry(tenant_id: str, name: str, record_key: str):
 def entry_history(tenant_id: str, name: str, record_key: str):
     return tenant(tenant_id)["history"].get((name, record_key), [])
 
+@app.post("/api/v1/tenants/{tenant_id}/query")
+def query_unified(tenant_id: str, body: Dict[str, Any]):
+    """PL/SQL-style unified query: { table, field, op, value, fields? }.
+
+    `field` may be either `recordKey` (top-level) or `data.<key>` for any
+    column inside the JSONB payload. `op` is one of `equals`, `contains`,
+    `startsWith`. Empty `field` / `value` → list rows (with optional
+    projection).
+    """
+    table = body.get("table")
+    if not table:
+        raise HTTPException(status_code=400, detail="'table' is required")
+    field = (body.get("field") or "").strip()
+    op    = (body.get("op")    or "equals").strip()
+    value = body.get("value")
+    fields = body.get("fields")
+    if not field or value in (None, ""):
+        rows = _collect_entries(tenant_id, table, 1000)
+        return [project(r, fields) for r in rows]
+    # Resolve which getter to use per cell — recordKey lives on the row;
+    # data.<col> lives inside the JSONB payload.
+    def cell(row):
+        if field == "recordKey":              return row.get("recordKey")
+        if field.startswith("data."):         return (row.get("data") or {}).get(field[5:])
+        return None
+    def matches(row):
+        v = cell(row)
+        if op == "equals":     return v == value
+        if op == "contains":   return v is not None and str(value).lower() in str(v).lower()
+        if op == "startsWith": return v is not None and str(v).lower().startswith(str(value).lower())
+        return False
+    rows = [r for r in _collect_entries(tenant_id, table, 1000) if matches(r)]
+    return [project(r, fields) for r in rows]
+
+
 @app.post("/api/v1/tenants/{tenant_id}/tables/{name}/search")
 def search(tenant_id: str, name: str, body: Dict[str, Any],
            fields: Optional[str] = Query(None)):

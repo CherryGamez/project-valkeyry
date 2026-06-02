@@ -516,7 +516,54 @@ SQL-style `WHERE column = value` query.
 - P2 — Surface the schema revision history in the Edit-schema modal (so
   users can see what changed from v(n-1) → v(n)).
 
-### 2026-02-14 (night) — Sidebar search · value auto-suggest · cursor pagination
+### 2026-02-15 — PL/SQL-style unified query (UI + REST)
+**Problem**: query bar required pre-selecting a table by clicking it in the
+sidebar; `recordKey` (the PK) wasn't even a field option; and there was
+no single REST endpoint that mirrored the UI's WHERE behaviour.
+
+**What shipped**
+1. **Query bar redesigned** — six controls in PL/SQL order:
+   `FROM (table) · SELECT (columns) · WHERE field · OPERATOR · VALUE · Run · Reset`.
+   The FROM dropdown lists every table in the tenant; switching tables
+   re-fetches the picked table's schema and repopulates the WHERE field
+   dropdown with `recordKey` first, then every `data.<col>` key.
+   Value auto-suggest follows the picked field.
+2. **`POST /api/v1/tenants/{tenantId}/query`** — new unified REST endpoint
+   (Java `UnifiedQueryController` + Python mock parity). Body:
+   ```
+   { "table": "users",
+     "field": "recordKey" | "data.<col>",
+     "op":    "equals" | "contains" | "startsWith",
+     "value": <any JSON>,
+     "fields": "recordKey,data.role"   // optional projection (CSV)
+   }
+   ```
+   `recordKey + equals` → fast-path PK lookup (`GET /entries/{key}`).
+   Anything else → `service.search(...)` with the existing JSONB engine.
+3. **GUI fast-path** — `runQuery()` detects `recordKey + equals` client
+   side and calls `GET /entries/{key}` directly (saves a hop); other
+   combinations POST to the new `/query` endpoint.
+4. **Endpoints catalog** updated to surface the new endpoint with a
+   tenant-aware path.
+
+**Testing performed**
+- Curl against the live preview:
+  - `POST /query {table:users, field:recordKey, op:equals, value:"alice@acme.io"}` →
+    1 row, full payload returned. ✅
+  - `POST /query {table:users, field:data.role, op:equals, value:"admin", fields:"recordKey,data.role"}` →
+    1 row, projected. ✅
+  - `POST /query {table:users, field:data.email, op:contains, value:"alice"}` →
+    1 row. ✅
+  - **Cross-table** `POST /query {table:feature_flags, field:data.enabled, op:equals, value:true}` →
+    2 rows (`dark.mode`, `checkout.v2`). ✅
+- Playwright: PK lookup from the GUI returned `200 · 1 row(s) · 70 ms · GET /entries/alice@acme.io`. ✅
+- Switching FROM dropdown auto-repopulated the WHERE-field options
+  with `feature_flags`'s columns. ✅
+
+**Files**
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/UnifiedQueryController.java` (new)
+- `valkeyry-config/src/main/resources/static/index.html` (Query card redesign + JS)
+- `backend/server.py` (`POST /query`)
 1. **Searchable sidebar** — `<input type="search">` below the "VIRTUAL TABLES" label runs a DOM substring filter (case-insensitive) on every row's `data-table-name`. Zero network calls. Survives sidebar refreshes via a one-shot `htmx:afterSettle` hook that re-applies the active filter. Inline `No tables match this filter.` when nothing matches.
 2. **Value auto-suggest** in the Query bar — picking a field fetches up to 500 rows projected to just that column via `?fields=data.<key>`, then feeds a `<datalist>` with the top 50 distinct values. Per-(table,field) cached. Verified: `data.role` → `['admin','editor','viewer']`.
 3. **Cursor pagination** — pager strip below entries: `page N · rows X–Y` status, `Rows/page` selector (25/50/100/200), `‹ Prev` and `Next ›`. Cursor lives in `window.__pageOffset` / `window.__pageSize`; resets on table switch. Mock backend's `list_entries` now accepts `offset: int`. Verified: page 1 → 2 rows, Next → page 2 → 1 row, status `page 2 · rows 3–4`.

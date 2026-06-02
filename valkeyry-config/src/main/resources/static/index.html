@@ -887,8 +887,7 @@ function syncConnStatus() {
 function refreshSidebar() {
     if (!hasConn()) return;
     htmx.ajax('GET', apiBase() + '/tables', { target: '#sidebar-list', swap: 'none' });
-    // Re-apply the active filter after the swap completes — htmx fires htmx:afterSettle
-    // for the swap; we hook a one-shot listener below.
+    refreshAllTables();   // keep the Query bar's FROM dropdown in sync
     document.body.addEventListener('htmx:afterSettle', () => {
         const inp = document.getElementById('sidebar-search');
         if (inp && inp.value) filterSidebarTables(inp.value);
@@ -1013,7 +1012,8 @@ function endpointCatalog() {
         { group:'Virtual Tables',    method:'GET',    path: base + '/tables/{name}',                         summary:'Fetch a single table + its schema', tryable:false },
 
         // Entries
-        { group:'Entries (records)', method:'GET',    path: base + '/tables/{name}/entries',                 summary:'List entries (paged)',              tryable:false },
+        { group:'Entries (records)', method:'POST',   path: base + '/query',                                  summary:'PL/SQL-style WHERE search across any field (incl. recordKey)', tryable:false },
+        { group:'Entries (records)', method:'GET',    path: base + '/tables/{name}/entries',                 summary:'List entries (paged) · supports `?fields=` projection + `?offset=`/`?limit=`', tryable:false },
         { group:'Entries (records)', method:'POST',   path: base + '/tables/{name}/entries',                 summary:'Ingest a single entry',             tryable:false },
         { group:'Entries (records)', method:'POST',   path: base + '/tables/{name}/entries:batch',           summary:'Ingest a batch of entries',         tryable:false },
         { group:'Entries (records)', method:'GET',    path: base + '/tables/{name}/entries/{recordKey}',     summary:'Fetch one entry by record key',     tryable:false },
@@ -1356,30 +1356,42 @@ async function selectTable(name) {
         </details>
       </div>
 
-      <!-- ============= SQL-style query + 2-column results / preview ============= -->
+      <!-- ============= PL/SQL-style query ============= -->
       <div class="ios-card p-5 mb-3 grid gap-3" data-testid="query-card">
           <div class="flex items-center justify-between flex-wrap gap-2">
               <div>
-                  <div class="section-label">Query — <span class="text-ink-500 normal-case font-normal">SELECT <code class="font-mono text-ink-700">columns</code> FROM <code class="font-mono text-ink-700">${escapeHtml(name)}</code> WHERE <code class="font-mono text-ink-700">field op value</code></span></div>
+                  <div class="section-label">Query — <span class="text-ink-500 normal-case font-normal"><code class="font-mono text-ink-700">SELECT</code> columns <code class="font-mono text-ink-700">FROM</code> table <code class="font-mono text-ink-700">WHERE</code> field op value</span></div>
               </div>
-              <button onclick="copyQueryAsCurl('${escapeHtml(name)}')" data-testid="query-curl-btn"
+              <button onclick="copyQueryAsCurl()" data-testid="query-curl-btn"
                       class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill" title="Copy as curl">Copy as cURL</button>
           </div>
-          <div class="grid md:grid-cols-[2fr_1.2fr_1fr_2fr_auto_auto] gap-2 items-end">
+          <div class="grid md:grid-cols-[1.4fr_1.4fr_1.2fr_1fr_1.4fr_auto_auto] gap-2 items-end">
               <label class="grid gap-1">
-                  <span class="section-label">Columns (SELECT)</span>
-                  <input id="qb-fields" data-testid="qb-fields"
-                         class="ios-input text-[12px] font-mono"
-                         placeholder="recordKey,data.email,data.role"/>
+                  <span class="section-label">FROM (table)</span>
+                  <select id="qb-table" data-testid="qb-table" class="ios-input text-[12px] font-mono"
+                          onchange="onQueryTableChange()">
+                      <option value="">(pick a table)</option>
+                      ${(() => {
+                          const opts = (window.__allTables || [window.__currentTable]).filter(Boolean);
+                          return [...new Set(opts)].map(t => `<option value="${escapeHtml(t)}" ${t === name ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+                      })()}
+                  </select>
               </label>
               <label class="grid gap-1">
-                  <span class="section-label">Field (WHERE)</span>
-                  <select id="qb-field" data-testid="qb-field" class="ios-input text-[12px]"
-                          onchange="refreshValueSuggestions('${escapeHtml(name)}', this.value)">
-                      <option value="">(none — show all)</option>
+                  <span class="section-label">SELECT (columns)</span>
+                  <input id="qb-fields" data-testid="qb-fields"
+                         class="ios-input text-[12px] font-mono"
+                         placeholder="recordKey,data.email,…  (blank = *)"/>
+              </label>
+              <label class="grid gap-1">
+                  <span class="section-label">WHERE field</span>
+                  <select id="qb-field" data-testid="qb-field" class="ios-input text-[12px] font-mono"
+                          onchange="refreshValueSuggestionsForQuery()">
+                      <option value="">(none — list all)</option>
+                      <option value="recordKey">recordKey  ←  PK</option>
                       ${(() => {
                           if (!schema || !schema.properties) return '';
-                          return Object.keys(schema.properties).map(k => `<option value="${escapeHtml(k)}">data.${escapeHtml(k)}</option>`).join('');
+                          return Object.keys(schema.properties).map(k => `<option value="data.${escapeHtml(k)}">data.${escapeHtml(k)}</option>`).join('');
                       })()}
                   </select>
               </label>
@@ -1395,13 +1407,13 @@ async function selectTable(name) {
                   <span class="section-label">Value</span>
                   <input id="qb-value" data-testid="qb-value"
                          class="ios-input text-[12px] font-mono"
-                         placeholder="e.g. admin"
+                         placeholder="e.g. alice@acme.io  or  admin"
                          list="qb-value-suggestions"/>
                   <datalist id="qb-value-suggestions"></datalist>
               </label>
-              <button onclick="runQuery('${escapeHtml(name)}')" data-testid="qb-run-btn"
+              <button onclick="runQuery()" data-testid="qb-run-btn"
                       class="btn-primary press text-[13px] px-4 py-2.5">Run</button>
-              <button onclick="resetQuery('${escapeHtml(name)}')" data-testid="qb-reset-btn"
+              <button onclick="resetQuery()" data-testid="qb-reset-btn"
                       class="btn-ghost press text-[12px] px-3 py-2 border border-hairline rounded-pill">Reset</button>
           </div>
           <div id="qb-status" data-testid="qb-status" class="text-[11px] font-mono text-ink-500"></div>
@@ -2781,67 +2793,23 @@ function copyCurlForCurrent() {
         .catch(() => { prompt('Copy this cURL:', curl); });
 }
 
-// ============== Ingest / update an entry ==============
-
 // =====================================================================
-// SQL-style query bar + selected-entry preview
+// SQL/PL-SQL-style query bar
 // ---------------------------------------------------------------------
-// The query bar mirrors a tiny SQL grammar:
-//   SELECT <columns>  FROM <table>  WHERE <field> <op> <value>
-// • <columns>  → backend `?fields=` projection
-// • <field>    → key inside `data`
-// • <op>       → equals / contains / startsWith — translated client-side
-//                to a `POST /search` body the backend understands.
+// FROM <table> · SELECT <columns> · WHERE <field> <op> <value>
+//
+// • <table>  → table dropdown (populated from window.__allTables)
+// • <field>  → "recordKey" (PK) or any "data.<col>" key of the picked table
+// • <op>     → equals / contains / startsWith
+// • <value>  → free text + auto-suggest datalist
+//
+// Backend contract (same shape both client-side helper and REST callers use):
+//   POST /api/v1/tenants/{tenantId}/query
+//   { "table": "<table>", "field": "<recordKey|data.<col>>",
+//     "op":    "<equals|contains|startsWith>",
+//     "value": <any JSON>, "fields": "<csv>" }
+// → returns an array of EntryView (optionally projected).
 // =====================================================================
-async function runQuery(name) {
-    const fieldsCsv = document.getElementById('qb-fields').value.trim();
-    const whereKey  = document.getElementById('qb-field').value.trim();
-    const whereOp   = document.getElementById('qb-op').value;
-    const whereVal  = document.getElementById('qb-value').value;
-    window.__entryFields = fieldsCsv;
-
-    const status = document.getElementById('qb-status');
-    const t0 = performance.now();
-
-    let url, opts, requestBody = null;
-    if (!whereKey || whereVal === '') {
-        // No WHERE clause → just paged list, applying any field projection.
-        const qs = '?limit=200' + (fieldsCsv ? '&fields=' + encodeURIComponent(fieldsCsv) : '');
-        url = apiBase() + '/tables/' + encodeURIComponent(name) + '/entries' + qs;
-        opts = { method: 'GET' };
-    } else {
-        const body = {};
-        body[whereOp] = { [whereKey]: coerce(whereVal) };
-        const qs = (fieldsCsv ? '?fields=' + encodeURIComponent(fieldsCsv) : '');
-        url = apiBase() + '/tables/' + encodeURIComponent(name) + '/search' + qs;
-        opts = {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        };
-        requestBody = body;
-    }
-    status.textContent = '… running ' + opts.method + ' ' + url;
-    const res = await apiFetch(url, opts);
-    const dt = Math.round(performance.now() - t0);
-    const text = await res.text();
-    let rows;
-    try { rows = JSON.parse(text); } catch { rows = []; }
-    if (!Array.isArray(rows)) rows = [];
-    renderEntriesIntoGrid(name, rows);
-    status.textContent = `${res.status} · ${rows.length} row(s) · ${dt} ms`;
-    // Also push into the live-API-response panel so users see the JSON they got back.
-    showLiveResponse(opts.method, url, requestBody, res, rows, dt);
-}
-
-function resetQuery(name) {
-    document.getElementById('qb-fields').value = '';
-    document.getElementById('qb-field').value  = '';
-    document.getElementById('qb-value').value  = '';
-    document.getElementById('qb-status').textContent = '';
-    window.__entryFields = '';
-    loadEntries(name);
-}
 
 // Best-effort type coercion so the user can type 'true' / '42' / '"foo"' without ceremony.
 function coerce(raw) {
@@ -2853,31 +2821,145 @@ function coerce(raw) {
     try { return JSON.parse(raw); } catch { return raw; }
 }
 
-function copyQueryAsCurl(name) {
+// Refresh table dropdown options whenever the sidebar reloads.
+async function refreshAllTables() {
+    if (!hasConn()) return;
+    try {
+        const res = await apiFetch(apiBase() + '/tables');
+        if (!res.ok) return;
+        const ts = await res.json();
+        window.__allTables = (ts || []).map(t => t.tableName).sort();
+        // Re-populate the FROM dropdown if the query card is on screen.
+        const sel = document.getElementById('qb-table');
+        if (sel) {
+            const cur = sel.value;
+            sel.innerHTML = '<option value="">(pick a table)</option>' +
+                window.__allTables.map(t => `<option value="${escapeHtml(t)}" ${t === cur ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+        }
+    } catch {/* ignore */}
+}
+
+// When the user picks a different table in the FROM dropdown, refresh the
+// Field options to match that table's schema (recordKey is always first).
+async function onQueryTableChange() {
+    const sel = document.getElementById('qb-table');
+    if (!sel) return;
+    const table = sel.value;
+    const fieldSel = document.getElementById('qb-field');
+    if (!fieldSel) return;
+    fieldSel.innerHTML =
+        '<option value="">(none — list all)</option>' +
+        '<option value="recordKey">recordKey  ←  PK</option>';
+    if (!table) return;
+    try {
+        const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(table));
+        if (!res.ok) return;
+        const tv = await res.json();
+        const props = (tv.schema && tv.schema.properties) || {};
+        for (const k of Object.keys(props)) {
+            const opt = document.createElement('option');
+            opt.value = 'data.' + k;
+            opt.textContent = 'data.' + k;
+            fieldSel.appendChild(opt);
+        }
+    } catch {/* keep recordKey only */}
+}
+
+function refreshValueSuggestionsForQuery() {
+    const table = document.getElementById('qb-table').value;
+    const field = document.getElementById('qb-field').value;
+    if (!table || !field || field === 'recordKey') {
+        document.getElementById('qb-value-suggestions').innerHTML = '';
+        return;
+    }
+    refreshValueSuggestions(table, field.replace(/^data\./, ''));
+}
+
+async function runQuery() {
+    const table     = document.getElementById('qb-table').value.trim();
+    const field     = document.getElementById('qb-field').value.trim();   // 'recordKey' | 'data.<col>'
+    const op        = document.getElementById('qb-op').value;
+    const valueRaw  = document.getElementById('qb-value').value;
     const fieldsCsv = document.getElementById('qb-fields').value.trim();
-    const whereKey  = document.getElementById('qb-field').value.trim();
-    const whereOp   = document.getElementById('qb-op').value;
-    const whereVal  = document.getElementById('qb-value').value;
-    const conn = getConn();
-    const origin = window.location.origin;
-    const authHeader = (conn.mode === 'bearer')
+    window.__entryFields = fieldsCsv;
+
+    if (!table) {
+        document.getElementById('qb-status').textContent = '✗ pick a table first';
+        return;
+    }
+
+    // Fast path — equals on recordKey resolves to a direct GET (PK lookup).
+    if (field === 'recordKey' && op === 'equals' && valueRaw !== '') {
+        const url = apiBase() + '/tables/' + encodeURIComponent(table) +
+                    '/entries/' + encodeURIComponent(valueRaw) +
+                    (fieldsCsv ? '?fields=' + encodeURIComponent(fieldsCsv) : '');
+        const t0 = performance.now();
+        const res = await apiFetch(url, { method: 'GET' });
+        const dt = Math.round(performance.now() - t0);
+        const body = await res.text();
+        let parsed; try { parsed = JSON.parse(body); } catch { parsed = body; }
+        renderEntriesIntoGrid(table, res.ok ? [parsed] : []);
+        document.getElementById('qb-status').textContent =
+            `${res.status} · ${res.ok ? 1 : 0} row(s) · ${dt} ms · GET /entries/${valueRaw}`;
+        showLiveResponse('GET', url, null, res, parsed, dt);
+        return;
+    }
+
+    // Build the unified /query body (works for any field, including recordKey).
+    const body = { table, field, op, value: coerce(valueRaw), fields: fieldsCsv || null };
+    const url = apiBase() + '/query';
+    const t0 = performance.now();
+    const res = await apiFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    const dt = Math.round(performance.now() - t0);
+    const text = await res.text();
+    let rows; try { rows = JSON.parse(text); } catch { rows = []; }
+    if (!Array.isArray(rows)) rows = [];
+    renderEntriesIntoGrid(table, rows);
+    document.getElementById('qb-status').textContent =
+        `${res.status} · ${rows.length} row(s) · ${dt} ms · POST /query`;
+    showLiveResponse('POST', url, body, res, rows, dt);
+}
+
+function resetQuery() {
+    document.getElementById('qb-fields').value = '';
+    document.getElementById('qb-field').value  = '';
+    document.getElementById('qb-value').value  = '';
+    document.getElementById('qb-status').textContent = '';
+    window.__entryFields = '';
+    const table = document.getElementById('qb-table').value || window.__currentTable;
+    if (table) loadEntries(table);
+}
+
+function copyQueryAsCurl() {
+    const table     = document.getElementById('qb-table').value.trim() || '<table>';
+    const field     = document.getElementById('qb-field').value.trim();
+    const op        = document.getElementById('qb-op').value;
+    const valueRaw  = document.getElementById('qb-value').value;
+    const fieldsCsv = document.getElementById('qb-fields').value.trim();
+    const conn      = getConn();
+    const origin    = window.location.origin;
+    const authHdr   = (conn.mode === 'bearer')
         ? `-H "Authorization: Bearer ${conn.token || '<token>'}"`
         : `-H "X-API-Key: ${conn.token || '<api-key>'}"`;
+
     let curl;
-    if (!whereKey || whereVal === '') {
-        const qs = '?limit=200' + (fieldsCsv ? '&fields=' + encodeURIComponent(fieldsCsv) : '');
-        curl = `curl -G "${origin}${apiBase()}/tables/${encodeURIComponent(name)}/entries" ${authHeader}` +
-               (qs ? ` --data-urlencode "fields=${fieldsCsv}"` : '');
-    } else {
-        const body = {}; body[whereOp] = { [whereKey]: coerce(whereVal) };
+    if (field === 'recordKey' && op === 'equals' && valueRaw !== '') {
+        // PK lookup — GET
         const qs = fieldsCsv ? `?fields=${encodeURIComponent(fieldsCsv)}` : '';
-        curl = `curl -X POST "${origin}${apiBase()}/tables/${encodeURIComponent(name)}/search${qs}" \\\n  -H "Content-Type: application/json" \\\n  ${authHeader} \\\n  -d '${JSON.stringify(body).replace(/'/g, `'\\''`)}'`;
+        curl = `curl "${origin}${apiBase()}/tables/${encodeURIComponent(table)}/entries/${encodeURIComponent(valueRaw)}${qs}" ${authHdr}`;
+    } else {
+        const body = { table, field, op, value: coerce(valueRaw), fields: fieldsCsv || null };
+        curl = `curl -X POST "${origin}${apiBase()}/query" \\\n  -H "Content-Type: application/json" \\\n  ${authHdr} \\\n  -d '${JSON.stringify(body).replace(/'/g, `'\\''`)}'`;
     }
     navigator.clipboard.writeText(curl).then(() => toast('cURL copied to clipboard'))
         .catch(() => prompt('Copy this cURL:', curl));
 }
 
-// Render an array of EntryView objects directly into the entries grid using
+// ============== Ingest / update an entry ==============
 // the existing Mustache template (so the look-and-feel is identical to the
 // HTMX-rendered path).
 function renderEntriesIntoGrid(name, rows) {
