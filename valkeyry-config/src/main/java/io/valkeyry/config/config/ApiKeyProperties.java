@@ -2,11 +2,7 @@ package io.valkeyry.config.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Bind for {@code valkeyry.api-keys.table} — a comma-separated list of

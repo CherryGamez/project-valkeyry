@@ -8,7 +8,6 @@ import io.valkeyry.config.domain.ConfigAuditEntry;
 import io.valkeyry.config.repo.AuditWebhookSubscriptionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -52,7 +51,13 @@ public class AuditWebhookPublisher {
     private final ObjectMapper mapper;
     private final WebClient webClient;
 
-    @Autowired
+    public AuditWebhookPublisher() {
+        this.props = null;
+        this.subscriptions = null;
+        this.mapper = null;
+        this.webClient = null;
+    }
+
     public AuditWebhookPublisher(AuditWebhookProperties props,
                                  AuditWebhookSubscriptionRepository subscriptions,
                                  ObjectMapper mapper) {
