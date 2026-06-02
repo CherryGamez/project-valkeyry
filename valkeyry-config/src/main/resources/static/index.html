@@ -354,11 +354,21 @@
                     class="press text-ink-500 hover:text-ios-blue text-sm w-6 h-6 rounded-full hover:bg-ink-100/60 flex items-center justify-center">↻</button>
         </div>
 
+        <!-- Filter — substring match against table name. Survives sidebar refreshes. -->
+        <div class="px-1 pt-2 pb-1">
+            <input id="sidebar-search" data-testid="sidebar-search" type="search"
+                   placeholder="Search tables…"
+                   oninput="filterSidebarTables(this.value)"
+                   class="ios-input text-[12px] w-full"/>
+        </div>
+
         <!-- The table list — re-fetched after every successful create/select via htmx.ajax() -->
-        <div id="sidebar-list" data-testid="sidebar-list" class="pt-2.5 grid gap-1 max-h-[60vh] overflow-auto scrollbar"
+        <div id="sidebar-list" data-testid="sidebar-list" class="pt-1 grid gap-1 max-h-[60vh] overflow-auto scrollbar"
              data-template="sidebar-tpl">
             <div class="text-[12px] text-ink-500 italic px-3 py-3" data-testid="sidebar-empty">Connect to a tenant to load tables.</div>
         </div>
+        <div id="sidebar-search-empty" data-testid="sidebar-search-empty"
+             class="hidden text-[11px] text-ink-500 italic px-3 py-2">No tables match this filter.</div>
 
         <button onclick="document.getElementById('create-table-modal').showModal()"
                 data-testid="open-create-table-btn"
@@ -572,6 +582,7 @@
 {{#hasRows}}
 {{#rows}}
 <button onclick="selectTable('{{tableName}}')" data-testid="sidebar-item-{{tableName}}"
+        data-table-name="{{tableName}}"
         class="nav-item text-left px-3 py-2.5 grid gap-0.5">
     <span class="text-[14px] font-medium truncate">{{tableName}}</span>
     <span class="nav-meta text-[11px] font-mono text-ink-500">v{{configVersion}}</span>
@@ -876,6 +887,27 @@ function syncConnStatus() {
 function refreshSidebar() {
     if (!hasConn()) return;
     htmx.ajax('GET', apiBase() + '/tables', { target: '#sidebar-list', swap: 'none' });
+    // Re-apply the active filter after the swap completes — htmx fires htmx:afterSettle
+    // for the swap; we hook a one-shot listener below.
+    document.body.addEventListener('htmx:afterSettle', () => {
+        const inp = document.getElementById('sidebar-search');
+        if (inp && inp.value) filterSidebarTables(inp.value);
+    }, { once: true });
+}
+
+// Substring (case-insensitive) match on the visible table name. Pure DOM —
+// no extra network round-trips, so it stays snappy even at 1000+ tables.
+function filterSidebarTables(needle) {
+    const q = (needle || '').trim().toLowerCase();
+    let visible = 0;
+    document.querySelectorAll('#sidebar-list .nav-item, #sidebar-list [data-table-name]').forEach(el => {
+        const name = (el.dataset.tableName || el.textContent || '').trim().toLowerCase();
+        const show = !q || name.includes(q);
+        el.classList.toggle('hidden', !show);
+        if (show) visible++;
+    });
+    const empty = document.getElementById('sidebar-search-empty');
+    if (empty) empty.classList.toggle('hidden', visible > 0 || !q);
 }
 function loadAudit() {
     if (!hasConn()) return;
@@ -889,11 +921,66 @@ function loadEntries(name) {
     if (!hasConn()) return;
     const id = 'entries-grid-' + name;
     if (!document.getElementById(id)) return;
-    // Honour an optional caller-set field projection — by default every column is returned.
     const fields = (window.__entryFields || '').trim();
-    const qs = '?limit=200' + (fields ? '&fields=' + encodeURIComponent(fields) : '');
-    htmx.ajax('GET', apiBase() + '/tables/' + encodeURIComponent(name) + '/entries' + qs,
+    const limit  = window.__pageSize   || 50;
+    const offset = window.__pageOffset || 0;
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (fields) params.set('fields', fields);
+    htmx.ajax('GET', apiBase() + '/tables/' + encodeURIComponent(name) + '/entries?' + params,
               { target: '#' + id, swap: 'none' });
+    const statusEl = document.getElementById('entries-pager-status');
+    if (statusEl) {
+        const page = Math.floor(offset / limit) + 1;
+        statusEl.textContent = `page ${page}  ·  rows ${offset + 1}–${offset + limit}`;
+    }
+}
+
+function entriesPagePrev(name) {
+    const limit  = window.__pageSize   || 50;
+    window.__pageOffset = Math.max(0, (window.__pageOffset || 0) - limit);
+    loadEntries(name);
+}
+function entriesPageNext(name) {
+    const limit  = window.__pageSize   || 50;
+    window.__pageOffset = (window.__pageOffset || 0) + limit;
+    loadEntries(name);
+}
+
+// ─────────── Auto-suggest values for the Query bar ───────────
+// Pulls a sample of recent rows and computes the distinct values for the
+// selected field. Cached per (table,field) so flipping back and forth
+// doesn't re-fetch. Top 50 only — enough for a dropdown without becoming
+// a memory hog on tables with millions of records.
+const __valueCache = {};
+async function refreshValueSuggestions(name, field) {
+    const dl = document.getElementById('qb-value-suggestions');
+    if (!dl) return;
+    dl.innerHTML = '';
+    if (!field) return;
+    const cacheKey = name + '\\u0000' + field;
+    let values = __valueCache[cacheKey];
+    if (!values) {
+        const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name) +
+                                   '/entries?limit=500&fields=data.' + encodeURIComponent(field));
+        if (!res.ok) return;
+        const rows = await res.json().catch(() => []);
+        const set = new Set();
+        for (const r of (rows || [])) {
+            const v = (r.data || {})[field];
+            if (v === null || v === undefined) continue;
+            if (Array.isArray(v)) v.forEach(x => set.add(String(x)));
+            else if (typeof v === 'object') continue;
+            else set.add(String(v));
+            if (set.size >= 50) break;
+        }
+        values = [...set].sort();
+        __valueCache[cacheKey] = values;
+    }
+    values.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        dl.appendChild(opt);
+    });
 }
 
 function apiBase() {
@@ -1287,7 +1374,8 @@ async function selectTable(name) {
               </label>
               <label class="grid gap-1">
                   <span class="section-label">Field (WHERE)</span>
-                  <select id="qb-field" data-testid="qb-field" class="ios-input text-[12px]">
+                  <select id="qb-field" data-testid="qb-field" class="ios-input text-[12px]"
+                          onchange="refreshValueSuggestions('${escapeHtml(name)}', this.value)">
                       <option value="">(none — show all)</option>
                       ${(() => {
                           if (!schema || !schema.properties) return '';
@@ -1307,7 +1395,9 @@ async function selectTable(name) {
                   <span class="section-label">Value</span>
                   <input id="qb-value" data-testid="qb-value"
                          class="ios-input text-[12px] font-mono"
-                         placeholder="e.g. admin"/>
+                         placeholder="e.g. admin"
+                         list="qb-value-suggestions"/>
+                  <datalist id="qb-value-suggestions"></datalist>
               </label>
               <button onclick="runQuery('${escapeHtml(name)}')" data-testid="qb-run-btn"
                       class="btn-primary press text-[13px] px-4 py-2.5">Run</button>
@@ -1321,6 +1411,27 @@ async function selectTable(name) {
           <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
                data-template="entries-tpl">
             <div class="text-[13px] text-ink-500 italic px-2 py-3">Loading entries…</div>
+          </div>
+
+          <!-- Cursor / page controls -->
+          <div class="flex items-center justify-between gap-2 mt-1.5 px-1" data-testid="entries-pager">
+              <div class="text-[11px] text-ink-500" id="entries-pager-status">page 1</div>
+              <div class="flex items-center gap-1.5">
+                  <label class="text-[11px] text-ink-500">Rows/page
+                      <select id="entries-page-size" data-testid="entries-page-size"
+                              onchange="window.__pageSize = parseInt(this.value, 10); window.__pageOffset = 0; loadEntries('${escapeHtml(name)}')"
+                              class="ios-input text-[11px] py-0.5 px-1 ml-1">
+                          <option>25</option>
+                          <option selected>50</option>
+                          <option>100</option>
+                          <option>200</option>
+                      </select>
+                  </label>
+                  <button onclick="entriesPagePrev('${escapeHtml(name)}')" data-testid="entries-prev-btn"
+                          class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">‹ Prev</button>
+                  <button onclick="entriesPageNext('${escapeHtml(name)}')" data-testid="entries-next-btn"
+                          class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">Next ›</button>
+              </div>
           </div>
 
           <!-- Selected-entry preview pane -->
@@ -1366,6 +1477,7 @@ async function selectTable(name) {
     }
     loadEntries(name);
     window.__currentTable = name;
+    window.__pageOffset = 0;   // reset cursor when switching tables
     // Populate the schema-aware recipe chips and the persistent invocation history.
     renderRecipes();
     historyRenderAll();

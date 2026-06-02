@@ -415,13 +415,15 @@ def ingest_batch(tenant_id: str, name: str, body: List[IngestEntryRequest]):
 
 @app.get("/api/v1/tenants/{tenant_id}/tables/{name}/entries")
 def list_entries(tenant_id: str, name: str,
-                 limit: int = Query(200, ge=1, le=1000),
+                 limit: int = Query(50, ge=1, le=1000),
+                 offset: int = Query(0, ge=0),
                  fields: Optional[str] = Query(None,
                      description="Comma-separated field list to project. "
                                  "Use `data.<key>` for nested data keys. "
                                  "Default = all fields.")):
-    rows = _collect_entries(tenant_id, name, limit)
-    return [project(r, fields) for r in rows]
+    rows = _collect_entries(tenant_id, name, limit + offset + 1)
+    paged = rows[offset:offset + limit]
+    return [project(r, fields) for r in paged]
 
 def _collect_entries(tenant_id: str, name: str, limit: int = 1000) -> List[Dict[str, Any]]:
     t = tenant(tenant_id)

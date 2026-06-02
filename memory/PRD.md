@@ -513,9 +513,12 @@ SQL-style `WHERE column = value` query.
 
 **Next / Backlog**
 - P2 — Operator menu: add `not equals`, `>`, `<` for numeric/date fields.
-- P2 — Auto-suggest values in the Query bar (read distinct values of the
-  selected field from the entries list).
-- P2 — Add a `pageSize` selector + cursor-based pagination once tables
-  grow beyond the default 200-row cap.
 - P2 — Surface the schema revision history in the Edit-schema modal (so
   users can see what changed from v(n-1) → v(n)).
+
+### 2026-02-14 (night) — Sidebar search · value auto-suggest · cursor pagination
+1. **Searchable sidebar** — `<input type="search">` below the "VIRTUAL TABLES" label runs a DOM substring filter (case-insensitive) on every row's `data-table-name`. Zero network calls. Survives sidebar refreshes via a one-shot `htmx:afterSettle` hook that re-applies the active filter. Inline `No tables match this filter.` when nothing matches.
+2. **Value auto-suggest** in the Query bar — picking a field fetches up to 500 rows projected to just that column via `?fields=data.<key>`, then feeds a `<datalist>` with the top 50 distinct values. Per-(table,field) cached. Verified: `data.role` → `['admin','editor','viewer']`.
+3. **Cursor pagination** — pager strip below entries: `page N · rows X–Y` status, `Rows/page` selector (25/50/100/200), `‹ Prev` and `Next ›`. Cursor lives in `window.__pageOffset` / `window.__pageSize`; resets on table switch. Mock backend's `list_entries` now accepts `offset: int`. Verified: page 1 → 2 rows, Next → page 2 → 1 row, status `page 2 · rows 3–4`.
+
+**Files**: `valkeyry-config/src/main/resources/static/index.html`, `backend/server.py`.
