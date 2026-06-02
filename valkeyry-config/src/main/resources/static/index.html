@@ -664,7 +664,10 @@
 {{#hasRows}}
 <ul class="grid gap-2" data-testid="entries-list">
 {{#rows}}
-<li class="ios-card p-4 grid gap-2 lift" data-testid="entry-row-{{recordKey}}">
+<li class="ios-card p-4 grid gap-2 lift cursor-pointer hover:shadow-md transition-shadow" data-testid="entry-row-{{recordKey}}"
+    data-rk="{{recordKey}}" data-payload="{{dataJson}}"
+    data-meta="v{{version}} · {{createdAt}} · {{createdBy}}"
+    onclick="if (event.target.tagName !== 'BUTTON' && event.target.tagName !== 'A' && !event.target.closest('details,button,a')) selectEntryRow(this)">
     <div class="flex items-center gap-3 flex-wrap">
         <span class="font-mono text-[14px] text-ios-blue font-medium">{{recordKey}}</span>
         <span class="op-badge op-DEDUP_SKIP">v{{version}}</span>
@@ -675,9 +678,9 @@
         <pre class="json-box mt-2">{{dataJson}}</pre>
     </details>
     <div class="flex items-center gap-2 justify-end">
-        <button onclick="editEntry('{{recordKey}}', this)" data-rk-data="{{dataJson}}" data-testid="entry-edit-{{recordKey}}"
+        <button onclick="event.stopPropagation(); editEntry('{{recordKey}}', this)" data-rk-data="{{dataJson}}" data-testid="entry-edit-{{recordKey}}"
                 class="btn-secondary press text-[12px] px-4 py-2">Edit</button>
-        <button onclick="deleteEntry('{{recordKey}}')" data-testid="entry-delete-{{recordKey}}"
+        <button onclick="event.stopPropagation(); deleteEntry('{{recordKey}}')" data-testid="entry-delete-{{recordKey}}"
                 class="btn-danger press text-[12px] px-4 py-2">
             Delete
         </button>
@@ -687,7 +690,7 @@
 </ul>
 {{/hasRows}}
 {{^hasRows}}
-<div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="entries-empty">No entries yet. Use the form above to add one.</div>
+<div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="entries-empty">No entries match. Try clearing the WHERE clause or use the form above to add one.</div>
 {{/hasRows}}
 </template>
 
@@ -1170,12 +1173,8 @@ async function selectTable(name) {
             <p class="text-[11px] text-ink-500 font-mono">${schema ? 'JSON Schema attached' : 'no schema available'}</p>
           </div>
           <div class="flex items-center gap-2">
-              <input id="entry-fields-filter" data-testid="entry-fields-filter"
-                     class="ios-input text-[12px] font-mono max-w-[280px]"
-                     placeholder="Columns: recordKey,data.email,…"
-                     oninput="window.__entryFields = this.value; window.__entryFieldsApplyTimer && clearTimeout(window.__entryFieldsApplyTimer); window.__entryFieldsApplyTimer = setTimeout(() => loadEntries('${escapeHtml(name)}'), 400);"/>
-              <button onclick="window.__entryFields=''; document.getElementById('entry-fields-filter').value=''; loadEntries('${escapeHtml(name)}')" data-testid="entry-fields-reset-btn"
-                      class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill" title="Reset to all columns">×</button>
+              <button onclick="editTableSchema('${escapeHtml(name)}')" data-testid="edit-schema-btn"
+                      class="btn-secondary press text-[13px] px-4 py-2" title="Add/rename/remove fields — pushes a new schema version">✎ Edit schema</button>
               <button onclick="loadEntries('${escapeHtml(name)}')" data-testid="refresh-entries-btn"
                       class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
           </div>
@@ -1270,9 +1269,89 @@ async function selectTable(name) {
         </details>
       </div>
 
-      <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
-           data-template="entries-tpl">
-        <div class="text-[13px] text-ink-500 italic px-2 py-3">Loading entries…</div>
+      <!-- ============= SQL-style query + 2-column results / preview ============= -->
+      <div class="ios-card p-5 mb-3 grid gap-3" data-testid="query-card">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                  <div class="section-label">Query — <span class="text-ink-500 normal-case font-normal">SELECT <code class="font-mono text-ink-700">columns</code> FROM <code class="font-mono text-ink-700">${escapeHtml(name)}</code> WHERE <code class="font-mono text-ink-700">field op value</code></span></div>
+              </div>
+              <button onclick="copyQueryAsCurl('${escapeHtml(name)}')" data-testid="query-curl-btn"
+                      class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill" title="Copy as curl">Copy as cURL</button>
+          </div>
+          <div class="grid md:grid-cols-[2fr_1.2fr_1fr_2fr_auto_auto] gap-2 items-end">
+              <label class="grid gap-1">
+                  <span class="section-label">Columns (SELECT)</span>
+                  <input id="qb-fields" data-testid="qb-fields"
+                         class="ios-input text-[12px] font-mono"
+                         placeholder="recordKey,data.email,data.role"/>
+              </label>
+              <label class="grid gap-1">
+                  <span class="section-label">Field (WHERE)</span>
+                  <select id="qb-field" data-testid="qb-field" class="ios-input text-[12px]">
+                      <option value="">(none — show all)</option>
+                      ${(() => {
+                          if (!schema || !schema.properties) return '';
+                          return Object.keys(schema.properties).map(k => `<option value="${escapeHtml(k)}">data.${escapeHtml(k)}</option>`).join('');
+                      })()}
+                  </select>
+              </label>
+              <label class="grid gap-1">
+                  <span class="section-label">Operator</span>
+                  <select id="qb-op" data-testid="qb-op" class="ios-input text-[12px]">
+                      <option value="equals">=  (equals)</option>
+                      <option value="contains">contains</option>
+                      <option value="startsWith">starts with</option>
+                  </select>
+              </label>
+              <label class="grid gap-1">
+                  <span class="section-label">Value</span>
+                  <input id="qb-value" data-testid="qb-value"
+                         class="ios-input text-[12px] font-mono"
+                         placeholder="e.g. admin"/>
+              </label>
+              <button onclick="runQuery('${escapeHtml(name)}')" data-testid="qb-run-btn"
+                      class="btn-primary press text-[13px] px-4 py-2.5">Run</button>
+              <button onclick="resetQuery('${escapeHtml(name)}')" data-testid="qb-reset-btn"
+                      class="btn-ghost press text-[12px] px-3 py-2 border border-hairline rounded-pill">Reset</button>
+          </div>
+          <div id="qb-status" data-testid="qb-status" class="text-[11px] font-mono text-ink-500"></div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
+          <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
+               data-template="entries-tpl">
+            <div class="text-[13px] text-ink-500 italic px-2 py-3">Loading entries…</div>
+          </div>
+
+          <!-- Selected-entry preview pane -->
+          <aside id="entry-preview" data-testid="entry-preview"
+                 class="ios-card p-4 self-start sticky top-[124px] grid gap-2 bg-card-sub">
+              <div class="flex items-center justify-between">
+                  <div class="section-label">Selected entry</div>
+                  <button onclick="clearEntryPreview()" data-testid="ep-clear-btn"
+                          class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">Clear</button>
+              </div>
+              <div id="ep-empty" data-testid="ep-empty" class="text-[12px] text-ink-500 italic px-1 py-3">
+                  Click any row on the left to preview its JSON here.
+              </div>
+              <div id="ep-content" class="hidden grid gap-2.5">
+                  <div class="grid gap-1">
+                      <span class="section-label">Record key</span>
+                      <div class="font-mono text-[14px] text-ios-blue font-medium break-all" data-testid="ep-record-key" id="ep-record-key"></div>
+                      <div class="text-[11px] text-ink-500 font-mono" data-testid="ep-meta" id="ep-meta"></div>
+                  </div>
+                  <pre id="ep-json" data-testid="ep-json"
+                       class="json-box max-h-[55vh] overflow-auto scrollbar text-[11px]"></pre>
+                  <div class="flex items-center gap-2 flex-wrap">
+                      <button onclick="copyEntryJson()" data-testid="ep-copy-btn"
+                              class="btn-ghost press text-[11px] px-2.5 py-1 border border-hairline rounded-pill">Copy JSON</button>
+                      <button onclick="loadEntryIntoForm()" data-testid="ep-edit-btn"
+                              class="btn-secondary press text-[11px] px-2.5 py-1">Edit in form</button>
+                      <button onclick="deleteSelectedEntry('${escapeHtml(name)}')" data-testid="ep-delete-btn"
+                              class="btn-danger press text-[11px] px-2.5 py-1">Delete</button>
+                  </div>
+              </div>
+          </aside>
       </div>`;
     document.getElementById('tables-content').innerHTML = html;
     htmx.process(document.getElementById('tables-content'));
@@ -2591,6 +2670,192 @@ function copyCurlForCurrent() {
 }
 
 // ============== Ingest / update an entry ==============
+
+// =====================================================================
+// SQL-style query bar + selected-entry preview
+// ---------------------------------------------------------------------
+// The query bar mirrors a tiny SQL grammar:
+//   SELECT <columns>  FROM <table>  WHERE <field> <op> <value>
+// • <columns>  → backend `?fields=` projection
+// • <field>    → key inside `data`
+// • <op>       → equals / contains / startsWith — translated client-side
+//                to a `POST /search` body the backend understands.
+// =====================================================================
+async function runQuery(name) {
+    const fieldsCsv = document.getElementById('qb-fields').value.trim();
+    const whereKey  = document.getElementById('qb-field').value.trim();
+    const whereOp   = document.getElementById('qb-op').value;
+    const whereVal  = document.getElementById('qb-value').value;
+    window.__entryFields = fieldsCsv;
+
+    const status = document.getElementById('qb-status');
+    const t0 = performance.now();
+
+    let url, opts, requestBody = null;
+    if (!whereKey || whereVal === '') {
+        // No WHERE clause → just paged list, applying any field projection.
+        const qs = '?limit=200' + (fieldsCsv ? '&fields=' + encodeURIComponent(fieldsCsv) : '');
+        url = apiBase() + '/tables/' + encodeURIComponent(name) + '/entries' + qs;
+        opts = { method: 'GET' };
+    } else {
+        const body = {};
+        body[whereOp] = { [whereKey]: coerce(whereVal) };
+        const qs = (fieldsCsv ? '?fields=' + encodeURIComponent(fieldsCsv) : '');
+        url = apiBase() + '/tables/' + encodeURIComponent(name) + '/search' + qs;
+        opts = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        };
+        requestBody = body;
+    }
+    status.textContent = '… running ' + opts.method + ' ' + url;
+    const res = await apiFetch(url, opts);
+    const dt = Math.round(performance.now() - t0);
+    const text = await res.text();
+    let rows;
+    try { rows = JSON.parse(text); } catch { rows = []; }
+    if (!Array.isArray(rows)) rows = [];
+    renderEntriesIntoGrid(name, rows);
+    status.textContent = `${res.status} · ${rows.length} row(s) · ${dt} ms`;
+    // Also push into the live-API-response panel so users see the JSON they got back.
+    showLiveResponse(opts.method, url, requestBody, res, rows, dt);
+}
+
+function resetQuery(name) {
+    document.getElementById('qb-fields').value = '';
+    document.getElementById('qb-field').value  = '';
+    document.getElementById('qb-value').value  = '';
+    document.getElementById('qb-status').textContent = '';
+    window.__entryFields = '';
+    loadEntries(name);
+}
+
+// Best-effort type coercion so the user can type 'true' / '42' / '"foo"' without ceremony.
+function coerce(raw) {
+    if (raw === 'true')  return true;
+    if (raw === 'false') return false;
+    if (raw === 'null')  return null;
+    if (/^-?\d+$/.test(raw)) return parseInt(raw, 10);
+    if (/^-?\d+\.\d+$/.test(raw)) return parseFloat(raw);
+    try { return JSON.parse(raw); } catch { return raw; }
+}
+
+function copyQueryAsCurl(name) {
+    const fieldsCsv = document.getElementById('qb-fields').value.trim();
+    const whereKey  = document.getElementById('qb-field').value.trim();
+    const whereOp   = document.getElementById('qb-op').value;
+    const whereVal  = document.getElementById('qb-value').value;
+    const conn = getConn();
+    const origin = window.location.origin;
+    const authHeader = (conn.mode === 'bearer')
+        ? `-H "Authorization: Bearer ${conn.token || '<token>'}"`
+        : `-H "X-API-Key: ${conn.token || '<api-key>'}"`;
+    let curl;
+    if (!whereKey || whereVal === '') {
+        const qs = '?limit=200' + (fieldsCsv ? '&fields=' + encodeURIComponent(fieldsCsv) : '');
+        curl = `curl -G "${origin}${apiBase()}/tables/${encodeURIComponent(name)}/entries" ${authHeader}` +
+               (qs ? ` --data-urlencode "fields=${fieldsCsv}"` : '');
+    } else {
+        const body = {}; body[whereOp] = { [whereKey]: coerce(whereVal) };
+        const qs = fieldsCsv ? `?fields=${encodeURIComponent(fieldsCsv)}` : '';
+        curl = `curl -X POST "${origin}${apiBase()}/tables/${encodeURIComponent(name)}/search${qs}" \\\n  -H "Content-Type: application/json" \\\n  ${authHeader} \\\n  -d '${JSON.stringify(body).replace(/'/g, `'\\''`)}'`;
+    }
+    navigator.clipboard.writeText(curl).then(() => toast('cURL copied to clipboard'))
+        .catch(() => prompt('Copy this cURL:', curl));
+}
+
+// Render an array of EntryView objects directly into the entries grid using
+// the existing Mustache template (so the look-and-feel is identical to the
+// HTMX-rendered path).
+function renderEntriesIntoGrid(name, rows) {
+    const tpl = document.getElementById('entries-tpl').innerHTML;
+    const data = {
+        hasRows: rows.length > 0,
+        rows: rows.map(r => ({
+            recordKey: r.recordKey || '(no-key)',
+            version:   r.version || r.recordVersion || 1,
+            createdAt: r.createdAt || '',
+            createdBy: r.createdBy || '',
+            dataJson:  JSON.stringify(r.data || r, null, 2)
+                          .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        }))
+    };
+    document.getElementById('entries-grid-' + name).innerHTML = Mustache.render(tpl, data);
+}
+
+// ─────────── Selected-entry preview pane ───────────
+function selectEntryRow(li) {
+    document.querySelectorAll('[data-testid^="entry-row-"]').forEach(el =>
+        el.classList.remove('ring-2', 'ring-ios-blue'));
+    li.classList.add('ring-2', 'ring-ios-blue');
+    const rk      = li.dataset.rk;
+    const payload = li.dataset.payload;
+    const meta    = li.dataset.meta;
+    document.getElementById('ep-empty').classList.add('hidden');
+    document.getElementById('ep-content').classList.remove('hidden');
+    document.getElementById('ep-record-key').textContent = rk;
+    document.getElementById('ep-meta').textContent       = meta || '';
+    document.getElementById('ep-json').textContent       = payload || '{}';
+    window.__selectedEntry = { recordKey: rk, payload };
+}
+function clearEntryPreview() {
+    document.querySelectorAll('[data-testid^="entry-row-"]').forEach(el =>
+        el.classList.remove('ring-2', 'ring-ios-blue'));
+    document.getElementById('ep-empty').classList.remove('hidden');
+    document.getElementById('ep-content').classList.add('hidden');
+    window.__selectedEntry = null;
+}
+function copyEntryJson() {
+    const s = window.__selectedEntry;
+    if (!s) return;
+    navigator.clipboard.writeText(s.payload || '').then(() => toast('JSON copied'));
+}
+function loadEntryIntoForm() {
+    const s = window.__selectedEntry;
+    if (!s) return;
+    switchEntryMode('json');
+    document.getElementById('entry-key').value  = s.recordKey;
+    document.getElementById('entry-data').value = s.payload || '{}';
+    document.getElementById('entry-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function deleteSelectedEntry(name) {
+    const s = window.__selectedEntry;
+    if (!s) return;
+    if (!confirm('Delete entry "' + s.recordKey + '"?')) return;
+    const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name) +
+                               '/entries/' + encodeURIComponent(s.recordKey), { method: 'DELETE' });
+    if (res.ok) { toast('Deleted'); clearEntryPreview(); loadEntries(name); }
+    else        { toast('Delete failed: ' + res.status, true); }
+}
+
+// ─────────── Edit-schema flow (open Visual Builder pre-seeded) ───────────
+async function editTableSchema(name) {
+    const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name));
+    if (!res.ok) { toast('Could not load schema: ' + res.status, true); return; }
+    const tv = await res.json();
+    document.getElementById('ct-name').value = name;
+    document.getElementById('ct-name').disabled = true;     // table-name is the identity, can't rename
+    document.getElementById('ct-schema').value = JSON.stringify(tv.schema || {}, null, 2);
+    try { schemaBuilderLoadFromSchema(tv.schema || {}); } catch {/* keep raw JSON */}
+    // Make sure the modal opens in Visual Builder mode for additive edits.
+    switchSchemaMode('builder');
+    document.getElementById('create-table-modal').showModal();
+    // Repurpose the modal title to communicate intent.
+    const title = document.querySelector('#create-table-modal h2');
+    if (title) title.textContent = 'Edit schema — ' + name;
+}
+
+// Re-enable the table-name input + restore the title when the modal closes,
+// so the next "+ Declare new table" click resets cleanly.
+document.addEventListener('close', (e) => {
+    if (e.target && e.target.id === 'create-table-modal') {
+        const ni = document.getElementById('ct-name');
+        if (ni) ni.disabled = false;
+        const title = document.querySelector('#create-table-modal h2');
+        if (title) title.textContent = 'Declare a virtual table';
+    }
+}, true);
 async function ingestEntry(name) {
     // Batch mode? Delegate.
     if (window.__entryMode === 'batch') return ingestBatch(name);

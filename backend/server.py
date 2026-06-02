@@ -420,11 +420,14 @@ def list_entries(tenant_id: str, name: str,
                      description="Comma-separated field list to project. "
                                  "Use `data.<key>` for nested data keys. "
                                  "Default = all fields.")):
+    rows = _collect_entries(tenant_id, name, limit)
+    return [project(r, fields) for r in rows]
+
+def _collect_entries(tenant_id: str, name: str, limit: int = 1000) -> List[Dict[str, Any]]:
     t = tenant(tenant_id)
     rows = [e for (tn, _rk), e in t["entries"].items() if tn == name and not e.get("deleted")]
     rows.sort(key=lambda e: e["createdAt"], reverse=True)
-    rows = rows[:limit]
-    return [project(r, fields) for r in rows]
+    return rows[:limit]
 
 @app.get("/api/v1/tenants/{tenant_id}/tables/{name}/entries/{record_key}")
 def get_entry(tenant_id: str, name: str, record_key: str,
@@ -452,11 +455,28 @@ def entry_history(tenant_id: str, name: str, record_key: str):
     return tenant(tenant_id)["history"].get((name, record_key), [])
 
 @app.post("/api/v1/tenants/{tenant_id}/tables/{name}/search")
-def search(tenant_id: str, name: str, body: Dict[str, Any]):
-    # Trivial filter on top-level data keys.
-    rows = list_entries(tenant_id, name)
-    eq = body.get("equals") or {}
-    return [r for r in rows if all((r.get("data") or {}).get(k) == v for k, v in eq.items())]
+def search(tenant_id: str, name: str, body: Dict[str, Any],
+           fields: Optional[str] = Query(None)):
+    """Mini WHERE engine: supports `equals`, `contains` (substring), `startsWith`."""
+    rows = _collect_entries(tenant_id, name, 1000)
+    def matches(row, op, pred):
+        d = (row.get("data") or {})
+        for k, v in pred.items():
+            cell = d.get(k)
+            if op == "equals":
+                if cell != v: return False
+            elif op == "contains":
+                if cell is None or str(v).lower() not in str(cell).lower(): return False
+            elif op == "startsWith":
+                if cell is None or not str(cell).lower().startswith(str(v).lower()): return False
+            else:
+                return False
+        return True
+    out = []
+    for r in rows:
+        if all(matches(r, op, pred) for op, pred in body.items() if isinstance(pred, dict)):
+            out.append(project(r, fields))
+    return out
 
 # ─────────── Audit ───────────
 

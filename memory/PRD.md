@@ -433,3 +433,89 @@ projection, and the Visual Builder needed to handle complex schemas
   dot.
 - P2 — Helm chart: bundle a NetworkPolicy template (default-deny + allow
   Postgres + Ingress).
+
+### 2026-02-14 (late) — Schema evolution + SQL-style query + click-to-preview
+**Problem**: post-declare, the GUI had no path to add/rename fields, and
+there was no way to (a) click a row and see only its JSON, or (b) write a
+SQL-style `WHERE column = value` query.
+
+**What shipped**
+1. **`✎ Edit schema` button** next to the table title — reopens the
+   Visual Builder modal pre-seeded with the table's current schema (via
+   `schemaBuilderLoadFromSchema`), with the table-name input disabled
+   (identity is immutable) and the modal title flipped to `Edit schema —
+   <name>`. On submit, hits the same `POST /tables` endpoint which the
+   service treats as a `REVISE_TABLE` audit event (new `configVersion`).
+   New fields immediately render in the schema-driven entry form.
+2. **Selected-entry preview pane** — every row in the entries grid is now
+   clickable (anywhere outside the `View JSON` expander and the Edit /
+   Delete buttons). A sticky right-side card shows the prominent
+   `RECORD KEY`, the version + timestamp meta, the full JSON, and three
+   actions: `Copy JSON`, `Edit in form` (loads the payload into the Raw
+   JSON editor), `Delete`. Selection state is mirrored with a blue ring
+   on the chosen row.
+3. **SQL-style query bar** — `SELECT columns FROM <table> WHERE field
+   op value`. Four inputs (Columns, Field, Operator, Value) generate a
+   real backend call:
+     - empty WHERE → `GET /entries?fields=…` (paged list with projection)
+     - else        → `POST /search?fields=…` body
+                     `{ <op>: { <field>: <value> } }`
+   Operators: `equals`, `contains`, `startsWith`. Values are coerced
+   (`true` / `42` / `"foo"`) before sending. A `Copy as cURL` button
+   serialises the whole query (incl. auth header) for terminal use. The
+   resulting rows render through the existing Mustache template, so the
+   look-and-feel matches the unfiltered list, and every invocation is
+   pushed into the Live API panel + history list.
+4. **Mock backend** — `/search` now understands `equals`, `contains`,
+   `startsWith` and composes with the `?fields=` projection from the
+   previous iteration. Refactored `_collect_entries` so the `/search`
+   endpoint no longer crashes calling `list_entries` directly (the FastAPI
+   `Query` defaults aren't valid integers outside a request).
+
+**Testing performed**
+- `node --check` PASS.
+- Curl smoke against the mock backend:
+  - `POST /search {"equals":{"role":"admin"}}` → 1 row (alice) ✅
+  - `POST /search {"contains":{"email":"alice"}}` → 1 row ✅
+  - `POST /search?fields=recordKey,data.role,data.email {"equals":{"active":true}}` →
+    2 rows, properly projected ✅
+- Playwright end-to-end:
+  - `Edit schema` button present, modal opens titled `Edit schema — users`,
+    builder shows 5 existing rows, after adding `phone` and submitting
+    the table view reloaded with a new `PHONE` text input in the entry
+    form and `"phone"` in the JSON-Schema preview. ✅
+  - Click on a row → preview pane populates with `RECORD KEY · carol@acme.io`,
+    `v1 · 6/2/2026, 10:28:36 PM` meta, and the full JSON `{email,fullName,
+    role,active,tags,joinedAt}`. ✅
+  - WHERE bar `role = admin` with projection `recordKey,data.role,
+    data.email` → status `200 OK · 13 ms · 1 row(s)`, only alice's row
+    visible in the grid, Live API response showing the full request +
+    response. ✅
+
+**Files touched (this iteration)**
+- `valkeyry-config/src/main/resources/static/index.html`
+  - Replaced the inline field-projection input with a richer **Query
+    card** (4 inputs + Run/Reset/Copy-as-cURL) above the entries grid.
+  - Added a 2-column layout: entries grid (left) + sticky preview pane
+    (right).
+  - New JS: `runQuery`, `resetQuery`, `copyQueryAsCurl`,
+    `renderEntriesIntoGrid` (Mustache-based client-side render),
+    `selectEntryRow`, `clearEntryPreview`, `copyEntryJson`,
+    `loadEntryIntoForm`, `deleteSelectedEntry`, `editTableSchema`,
+    `coerce`. ~190 lines.
+  - Row template: `data-rk`, `data-payload`, `data-meta` attributes +
+    smart `onclick` filter so the row is clickable but Edit/Delete +
+    `<details>` keep their own click behaviour.
+- `backend/server.py`
+  - `_collect_entries` helper.
+  - `POST /search` now supports `equals` / `contains` / `startsWith` +
+    `?fields=` projection.
+
+**Next / Backlog**
+- P2 — Operator menu: add `not equals`, `>`, `<` for numeric/date fields.
+- P2 — Auto-suggest values in the Query bar (read distinct values of the
+  selected field from the entries list).
+- P2 — Add a `pageSize` selector + cursor-based pagination once tables
+  grow beyond the default 200-row cap.
+- P2 — Surface the schema revision history in the Edit-schema modal (so
+  users can see what changed from v(n-1) → v(n)).
