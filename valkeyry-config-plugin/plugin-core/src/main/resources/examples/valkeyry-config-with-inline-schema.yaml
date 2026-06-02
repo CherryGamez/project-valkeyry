@@ -1,0 +1,68 @@
+# Example manifest demonstrating BOTH schema styles supported by valkeyry-config-plugin:
+#
+#   1. schema:        path to a separate JSON-Schema file (classic)
+#   2. schemaInline:  declared right here in YAML (new) — covers every widget the
+#                     Visual Builder in the UI can produce: dropdown via "enum",
+#                     checkbox via "type: boolean", multi-choice via "type: array"
+#                     + "items.enum", numeric ranges, regex patterns, defaults.
+#
+# Copy this file into your project root, rename it to "valkeyry-config.yaml",
+# tweak the endpoint / tenant / auth, then run:
+#
+#   mvn  io.valkeyry:valkeyry-config-maven-plugin:push          # Maven
+#   ./gradlew valkeyryConfigPush                                 # Gradle
+
+endpoint: ${VALKEYRY_ENDPOINT:http://localhost:8081}
+tenant:   ${VALKEYRY_TENANT:demo-tenant}
+
+auth:
+  # Choose ONE of the following blocks:
+  type:   api-key
+  apiKey: ${VALKEYRY_API_KEY:plugin-test-key}
+  # type:     basic
+  # username: build-bot
+  # password: ${VALKEYRY_PASS}
+
+tables:
+
+  # -------- Style 1: classic, schema lives in a .schema.json file --------
+  - name:    customers
+    schema:  schemas/customers.schema.json
+    entries: data/customers/*.json
+
+  # -------- Style 2: schema declared inline (covers every widget) --------
+  - name: feature_flags
+    schemaInline:
+      $schema: "https://json-schema.org/draft/2020-12/schema"
+      title:    "Feature flag"
+      type:     object
+      required: [key, enabled]
+      properties:
+        key:
+          type:    string
+          title:   "Flag key"
+          pattern: "^[a-z0-9_.-]+$"
+        enabled:
+          type:    boolean
+          title:   "Enabled"
+          default: false
+        rolloutPercent:
+          type:    integer
+          title:   "Rollout %"
+          minimum: 0
+          maximum: 100
+          default: 0
+        audiences:
+          type:        array
+          title:       "Audiences (multi-choice)"
+          uniqueItems: true
+          items:
+            type: string
+            enum: [internal, beta, early-access, ga, enterprise]
+        owner:
+          type:  string
+          title: "Owner team (dropdown)"
+          enum:  [platform, payments, growth, security]
+          default: platform
+      additionalProperties: false
+    entries: data/flags/*.json

@@ -112,3 +112,68 @@ Also added a `@ExceptionHandler(DuplicateKeyException.class)` → `409 Conflict`
 - P2 — Optional: bundle Tailwind via CLI in `mvn package` to drop the CDN dev-warning in production.
 - P2 — Optional: HTMX `hx-push-url` for deep linking each tab/table to a URL.
 - P2 — Optional: WebSocket-driven live audit timeline (`hx-ext="ws"`).
+
+### 2026-02-13 — Flexible config types + LDAP/JWT test guides
+**Problem**: users had to hand-author Draft 2020-12 JSON Schemas, and there
+was no documented local-test path for `valkeyry-config` covering the LDAP /
+JWT auth tracks the security layer already supports.
+
+**What shipped**
+1. **UI Schema Builder** (`valkeyry-config/src/main/resources/static/index.html`).
+   - New `Visual Builder` ⇄ `Raw JSON` mode toggle inside the *Declare a virtual table* modal.
+   - Visual rows for: Text, Email, URL, Password, Date, Date-time, Number,
+     Integer, Checkbox (boolean), Dropdown (`enum`), Multi-choice
+     (`array` + `items.enum`).
+   - Live JSON regeneration into the existing `#ct-schema` textarea; the
+     submit path is unchanged, so no backend changes needed.
+   - Reverse-loader populates the builder from any existing schema; widgets
+     it doesn't recognise (nested object, `oneOf`) leave the user in Raw
+     JSON mode without data loss.
+2. **Plugin `schemaInline` support**
+   (`valkeyry-config-plugin/plugin-core/`).
+   - `PluginManifest.TableSpec.schemaInline: Map<String,Object>` accepts a
+     JSON-Schema declared directly in YAML — no `.schema.json` file required.
+   - `ManifestLoader.validate()` enforces *exactly one of* `schema` /
+     `schemaInline` per table.
+   - `PluginEngine.run()` prefers inline schemas when present and converts
+     them with `objectMapper.valueToTree(...)` before POSTing.
+   - Two new unit tests cover the happy path + the two rejection cases.
+3. **Test guides** (Windows + macOS, inside `valkeyry-config/`).
+   - `WINDOWS_TEST_GUIDE.md` and `MAC_TEST_GUIDE.md` — full Docker walkthrough
+     for: anonymous + API-key, **LDAP (`bitnami/openldap:2.6`)**, and
+     **OIDC JWT (`ghcr.io/navikt/mock-oauth2-server:2.1.10`)**.
+   - Includes plugin manifest snippets (file-based + inline), troubleshooting
+     matrices, and a teardown section.
+4. **Example manifest** at
+   `valkeyry-config-plugin/plugin-core/src/main/resources/examples/valkeyry-config-with-inline-schema.yaml`
+   demonstrating both schema styles side-by-side.
+
+**Testing performed**
+- Static-JS lint via `node --check`: PASS.
+- Live browser smoke via Playwright (served `index.html` over Python http.server):
+  - Default schema reverse-loaded into 3 builder rows. ✅
+  - Added a dropdown row with options `viewer, editor, admin` →
+    schema regenerated with correct `enum`. ✅
+  - Visual Builder ⇄ Raw JSON toggle round-trips cleanly. ✅
+  - Loading the "User profile" gallery template populated 5 builder rows
+    including the `role` dropdown with default `viewer`. ✅
+- Plugin Java + tests are visually validated only — no JVM in this pod.
+
+**Files touched (this iteration)**
+- `valkeyry-config/src/main/resources/static/index.html` (+ ~280 lines: builder UI + JS)
+- `valkeyry-config-plugin/plugin-core/src/main/java/io/valkeyry/plugin/core/manifest/PluginManifest.java`
+- `valkeyry-config-plugin/plugin-core/src/main/java/io/valkeyry/plugin/core/manifest/ManifestLoader.java`
+- `valkeyry-config-plugin/plugin-core/src/main/java/io/valkeyry/plugin/core/PluginEngine.java`
+- `valkeyry-config-plugin/plugin-core/src/test/java/io/valkeyry/plugin/core/manifest/ManifestLoaderTest.java`
+- `valkeyry-config-plugin/plugin-core/src/main/resources/examples/valkeyry-config-with-inline-schema.yaml` (new)
+- `valkeyry-config/WINDOWS_TEST_GUIDE.md` (new)
+- `valkeyry-config/MAC_TEST_GUIDE.md` (new)
+
+**Next / Backlog**
+- P1 — Run the new `ManifestLoaderTest` cases on a CI host with a JVM and
+  attach the surefire report to confirm the validation messages match.
+- P2 — Builder support for **nested objects** (recursive sub-rows) — today
+  nested schemas fall through to Raw JSON mode.
+- P2 — Builder support for **`oneOf` / discriminated variants**.
+- P2 — Persist the user's last-used editor mode (Builder vs Raw JSON) in
+  `localStorage` so the modal reopens in their preferred view.

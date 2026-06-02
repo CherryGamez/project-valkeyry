@@ -53,5 +53,22 @@ public final class ManifestLoader {
         if (m.getTables() == null || m.getTables().isEmpty()) {
             throw new IllegalArgumentException("Missing 'tables' in " + file);
         }
+        for (PluginManifest.TableSpec t : m.getTables()) {
+            if (t.getName() == null || t.getName().isBlank()) {
+                throw new IllegalArgumentException("Each table must have a 'name' (" + file + ")");
+            }
+            boolean hasFile   = t.getSchema() != null && !t.getSchema().isBlank();
+            boolean hasInline = t.hasInlineSchema();
+            if (!hasFile && !hasInline) {
+                throw new IllegalArgumentException(
+                        "Table '" + t.getName() + "' must declare either 'schema' (file path) "
+                                + "or 'schemaInline' (inline JSON-Schema) in " + file);
+            }
+            if (hasFile && hasInline) {
+                throw new IllegalArgumentException(
+                        "Table '" + t.getName() + "' has both 'schema' and 'schemaInline'; "
+                                + "pick one in " + file);
+            }
+        }
     }
 }

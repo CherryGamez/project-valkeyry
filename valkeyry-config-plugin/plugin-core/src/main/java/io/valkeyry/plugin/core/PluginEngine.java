@@ -49,7 +49,9 @@ public final class PluginEngine {
 
         for (PluginManifest.TableSpec table : manifest.getTables()) {
             ctx.log().info("· " + table.getName() + ": declaring schema…");
-            JsonNode schema = MAPPER.readTree(ctx.projectBaseDir().resolve(table.getSchema()).toFile());
+            JsonNode schema = table.hasInlineSchema()
+                    ? MAPPER.valueToTree(table.getSchemaInline())
+                    : MAPPER.readTree(ctx.projectBaseDir().resolve(table.getSchema()).toFile());
             ValkeyryConfigClient.DeclareResult decl = client.declareTable(manifest.getTenant(), table.getName(), schema);
             ctx.log().info("  → registered id=" + decl.id() + " configVersion=" + decl.configVersion());
             declared.add(table.getName());

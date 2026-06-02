@@ -463,7 +463,37 @@
                     <button type="button" onclick="loadSchemaTemplate('discriminated')" data-testid="gallery-discriminated" class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Discriminated (oneOf picker)</button>
                 </div>
             </div>
-            <label class="grid gap-1.5">
+
+            <!-- ============= Mode switch: Visual Builder ⇄ Raw JSON ============= -->
+            <div class="grid gap-2" data-testid="ct-mode-row">
+                <span class="section-label">Editor</span>
+                <div class="inline-flex rounded-pill border border-hairline p-1 bg-card-sub w-fit">
+                    <button type="button" id="ct-mode-builder-btn" data-testid="ct-mode-builder-btn"
+                            onclick="switchSchemaMode('builder')"
+                            class="press px-3 py-1 rounded-pill text-[12px] bg-white shadow-sm">Visual Builder</button>
+                    <button type="button" id="ct-mode-json-btn" data-testid="ct-mode-json-btn"
+                            onclick="switchSchemaMode('json')"
+                            class="press px-3 py-1 rounded-pill text-[12px]">Raw JSON</button>
+                </div>
+            </div>
+
+            <!-- ============= Visual schema builder ============= -->
+            <div id="ct-builder" data-testid="ct-builder" class="grid gap-3">
+                <div class="flex items-center justify-between">
+                    <span class="section-label">Fields</span>
+                    <button type="button" onclick="schemaBuilderAddField()" data-testid="sb-add-field-btn"
+                            class="btn-secondary press text-[12px] px-3 py-1.5">+ Add field</button>
+                </div>
+                <div id="sb-fields" data-testid="sb-fields" class="grid gap-2">
+                    <!-- field rows injected here -->
+                </div>
+                <details class="text-[12px] text-ink-500">
+                    <summary class="cursor-pointer hover:text-ios-blue">Preview generated JSON Schema</summary>
+                    <pre id="sb-json-preview" data-testid="sb-json-preview" class="json-box mt-2"></pre>
+                </details>
+            </div>
+
+            <label id="ct-schema-wrap" class="grid gap-1.5 hidden">
                 <span class="section-label">JSON Schema</span>
                 <textarea id="ct-schema" rows="14" required data-testid="ct-schema-input"
                           class="ios-input font-mono text-[12px]"
@@ -1456,8 +1486,349 @@ function loadSchemaTemplate(key) {
             flag:'feature_flags', event:'events', discriminated:'channels'
         })[key] || key;
     }
+    // Mirror the loaded template into the visual builder so users can keep editing it
+    // from either side without losing state.
+    try { schemaBuilderLoadFromSchema(tpl); } catch { /* template uses unsupported widget — stay in JSON mode */ }
     toast('Loaded "' + (tpl.title || key) + '" template');
 }
+
+// =====================================================================
+// Visual Schema Builder
+// ---------------------------------------------------------------------
+// Lets a non-developer assemble a Draft 2020-12 JSON Schema by adding
+// fields and picking widget types. Each row maps to one property under
+// the root object's "properties". The builder writes a fresh schema into
+// #ct-schema (the existing textarea) on every change, so the create flow
+// stays unchanged on submit.
+//
+// Supported widget types (mirrors what renderSchemaForm understands):
+//   text · email · url · password · date · datetime · number ·
+//   integer · boolean · dropdown · multi-choice
+// =====================================================================
+const SB_WIDGETS = [
+    { key:'text',       label:'Text',          jsType:'string'  },
+    { key:'email',      label:'Email',         jsType:'string',  format:'email'     },
+    { key:'url',        label:'URL',           jsType:'string',  format:'uri'       },
+    { key:'password',   label:'Password',      jsType:'string',  format:'password'  },
+    { key:'date',       label:'Date',          jsType:'string',  format:'date'      },
+    { key:'datetime',   label:'Date & time',   jsType:'string',  format:'date-time' },
+    { key:'number',     label:'Number',        jsType:'number'  },
+    { key:'integer',    label:'Integer',       jsType:'integer' },
+    { key:'boolean',    label:'Checkbox (boolean)', jsType:'boolean' },
+    { key:'dropdown',   label:'Dropdown (single choice)', jsType:'string', needsOptions:true },
+    { key:'multi',      label:'Multi-choice',            jsType:'array',  needsOptions:true }
+];
+
+let __sbFields = [];   // [{ id, name, title, widget, required, defaultVal, options, min, max, pattern, description }]
+let __sbSeq    = 0;
+let __sbMode   = 'builder';
+
+function schemaBuilderAddField(initial) {
+    const seed = initial || {};
+    __sbFields.push({
+        id: ++__sbSeq,
+        name:        seed.name        || ('field' + __sbSeq),
+        title:       seed.title       || '',
+        widget:      seed.widget      || 'text',
+        required:    seed.required    === true,
+        defaultVal:  seed.defaultVal  != null ? String(seed.defaultVal) : '',
+        options:     seed.options     || '',
+        min:         seed.min         != null ? String(seed.min) : '',
+        max:         seed.max         != null ? String(seed.max) : '',
+        pattern:     seed.pattern     || '',
+        description: seed.description || ''
+    });
+    schemaBuilderRender();
+    schemaBuilderSync();
+}
+
+function schemaBuilderRemoveField(id) {
+    __sbFields = __sbFields.filter(f => f.id !== id);
+    schemaBuilderRender();
+    schemaBuilderSync();
+}
+
+function schemaBuilderRender() {
+    const host = document.getElementById('sb-fields');
+    if (!host) return;
+    if (__sbFields.length === 0) {
+        host.innerHTML = '<div class="text-[12px] text-ink-500 italic px-1 py-2" data-testid="sb-empty">No fields yet — click <strong>+ Add field</strong> to start.</div>';
+        return;
+    }
+    host.innerHTML = '';
+    __sbFields.forEach(f => host.appendChild(schemaBuilderRow(f)));
+}
+
+function schemaBuilderRow(f) {
+    const wrap = document.createElement('div');
+    wrap.className = 'rounded-card border border-hairline bg-white p-3 grid gap-2';
+    wrap.dataset.testid = 'sb-row-' + f.id;
+    wrap.dataset.sbId   = String(f.id);
+
+    // ── Row 1: name · widget · required · delete ──
+    const head = document.createElement('div');
+    head.className = 'grid gap-2 md:grid-cols-[1.2fr_1.4fr_auto_auto] items-end';
+    head.appendChild(sbInput('Field name', 'text', f.name, v => { f.name = v; schemaBuilderSync(); },
+        { mono:true, testid:'sb-name-' + f.id, placeholder:'e.g. role, email, isActive' }));
+    head.appendChild(sbSelect('Widget', SB_WIDGETS.map(w => ({ value:w.key, label:w.label })), f.widget,
+        v => { f.widget = v; schemaBuilderRender(); schemaBuilderSync(); }, 'sb-widget-' + f.id));
+    head.appendChild(sbCheckbox('Required', f.required, v => { f.required = v; schemaBuilderSync(); }, 'sb-req-' + f.id));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn-danger press px-3 py-1.5 text-[12px] h-fit';
+    del.dataset.testid = 'sb-del-' + f.id;
+    del.textContent = 'Remove';
+    del.onclick = () => schemaBuilderRemoveField(f.id);
+    head.appendChild(del);
+    wrap.appendChild(head);
+
+    // ── Row 2: label · description ──
+    const meta = document.createElement('div');
+    meta.className = 'grid gap-2 md:grid-cols-2';
+    meta.appendChild(sbInput('Display label', 'text', f.title, v => { f.title = v; schemaBuilderSync(); },
+        { testid:'sb-title-' + f.id, placeholder:'(optional, defaults to field name)' }));
+    meta.appendChild(sbInput('Description', 'text', f.description, v => { f.description = v; schemaBuilderSync(); },
+        { testid:'sb-desc-' + f.id, placeholder:'(optional helper text)' }));
+    wrap.appendChild(meta);
+
+    // ── Row 3: widget-specific extras ──
+    const widget = SB_WIDGETS.find(w => w.key === f.widget) || SB_WIDGETS[0];
+    const extras = document.createElement('div');
+    extras.className = 'grid gap-2 md:grid-cols-3';
+
+    if (widget.needsOptions) {
+        const opts = sbInput('Options (comma-separated)', 'text', f.options,
+            v => { f.options = v; schemaBuilderSync(); },
+            { mono:true, testid:'sb-opts-' + f.id, placeholder:'viewer, editor, admin', span:3 });
+        extras.appendChild(opts);
+    }
+    if (widget.jsType === 'number' || widget.jsType === 'integer') {
+        extras.appendChild(sbInput('Minimum', 'number', f.min, v => { f.min = v; schemaBuilderSync(); },
+            { testid:'sb-min-' + f.id }));
+        extras.appendChild(sbInput('Maximum', 'number', f.max, v => { f.max = v; schemaBuilderSync(); },
+            { testid:'sb-max-' + f.id }));
+    }
+    if (widget.jsType === 'string' && !widget.needsOptions && widget.format !== 'date' && widget.format !== 'date-time') {
+        extras.appendChild(sbInput('Regex pattern', 'text', f.pattern, v => { f.pattern = v; schemaBuilderSync(); },
+            { mono:true, testid:'sb-pattern-' + f.id, placeholder:'^[A-Z0-9_-]+$' }));
+    }
+    if (widget.key === 'boolean') {
+        extras.appendChild(sbSelect('Default', [
+            { value:'',      label:'(none)' },
+            { value:'true',  label:'true (checked)' },
+            { value:'false', label:'false (unchecked)' }
+        ], f.defaultVal, v => { f.defaultVal = v; schemaBuilderSync(); }, 'sb-default-' + f.id));
+    } else if (widget.key !== 'multi') {
+        extras.appendChild(sbInput('Default value', 'text', f.defaultVal,
+            v => { f.defaultVal = v; schemaBuilderSync(); }, { testid:'sb-default-' + f.id }));
+    }
+
+    if (extras.children.length) wrap.appendChild(extras);
+    return wrap;
+}
+
+function sbInput(label, type, value, onChange, opts) {
+    opts = opts || {};
+    const l = document.createElement('label');
+    l.className = 'grid gap-1' + (opts.span === 3 ? ' md:col-span-3' : '');
+    const s = document.createElement('span');
+    s.className = 'section-label';
+    s.textContent = label;
+    const i = document.createElement('input');
+    i.type = type;
+    i.value = value != null ? value : '';
+    i.className = 'ios-input text-[13px]' + (opts.mono ? ' font-mono' : '');
+    if (opts.placeholder) i.placeholder = opts.placeholder;
+    if (opts.testid) i.dataset.testid = opts.testid;
+    i.addEventListener('input', () => onChange(i.value));
+    l.appendChild(s); l.appendChild(i);
+    return l;
+}
+function sbSelect(label, options, value, onChange, testid) {
+    const l = document.createElement('label');
+    l.className = 'grid gap-1';
+    const s = document.createElement('span');
+    s.className = 'section-label';
+    s.textContent = label;
+    const sel = document.createElement('select');
+    sel.className = 'ios-input text-[13px]';
+    if (testid) sel.dataset.testid = testid;
+    options.forEach(o => {
+        const op = document.createElement('option');
+        op.value = o.value; op.textContent = o.label;
+        sel.appendChild(op);
+    });
+    sel.value = value || '';
+    sel.addEventListener('change', () => onChange(sel.value));
+    l.appendChild(s); l.appendChild(sel);
+    return l;
+}
+function sbCheckbox(label, checked, onChange, testid) {
+    const l = document.createElement('label');
+    l.className = 'flex items-center gap-2 mb-1';
+    const c = document.createElement('input');
+    c.type = 'checkbox';
+    c.className = 'h-4 w-4';
+    c.checked = !!checked;
+    if (testid) c.dataset.testid = testid;
+    c.addEventListener('change', () => onChange(c.checked));
+    const s = document.createElement('span');
+    s.className = 'section-label';
+    s.textContent = label;
+    l.appendChild(c); l.appendChild(s);
+    return l;
+}
+
+// Convert __sbFields → JSON-Schema document and write it into #ct-schema.
+function schemaBuilderToSchema() {
+    const properties = {};
+    const required = [];
+    __sbFields.forEach(f => {
+        if (!f.name || !f.name.trim()) return;
+        const key = f.name.trim();
+        const widget = SB_WIDGETS.find(w => w.key === f.widget) || SB_WIDGETS[0];
+        const node = {};
+        if (widget.key === 'multi') {
+            node.type = 'array';
+            node.uniqueItems = true;
+            node.items = { type: 'string', enum: splitOptions(f.options) };
+        } else if (widget.key === 'dropdown') {
+            node.type = 'string';
+            node.enum = splitOptions(f.options);
+        } else {
+            node.type = widget.jsType;
+            if (widget.format) node.format = widget.format;
+        }
+        if (f.title       && f.title.trim())       node.title       = f.title.trim();
+        if (f.description && f.description.trim()) node.description = f.description.trim();
+        if (f.pattern     && f.pattern.trim() && node.type === 'string' && !node.enum && !node.format) {
+            node.pattern = f.pattern.trim();
+        }
+        if ((node.type === 'number' || node.type === 'integer')) {
+            if (f.min !== '' && !isNaN(parseFloat(f.min))) node.minimum = parseFloat(f.min);
+            if (f.max !== '' && !isNaN(parseFloat(f.max))) node.maximum = parseFloat(f.max);
+        }
+        if (f.defaultVal !== '' && f.defaultVal != null) {
+            if (widget.key === 'boolean')           node.default = f.defaultVal === 'true';
+            else if (node.type === 'integer')       node.default = parseInt(f.defaultVal, 10);
+            else if (node.type === 'number')        node.default = parseFloat(f.defaultVal);
+            else if (widget.key !== 'multi')        node.default = f.defaultVal;
+        }
+        properties[key] = node;
+        if (f.required) required.push(key);
+    });
+    const schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties,
+        additionalProperties: false
+    };
+    if (required.length) schema.required = required;
+    return schema;
+}
+
+function splitOptions(raw) {
+    return (raw || '').split(',').map(s => s.trim()).filter(s => s !== '');
+}
+
+function schemaBuilderSync() {
+    const schema = schemaBuilderToSchema();
+    const json = JSON.stringify(schema, null, 2);
+    const ta = document.getElementById('ct-schema');
+    if (ta) ta.value = json;
+    const pv = document.getElementById('sb-json-preview');
+    if (pv) pv.textContent = json;
+}
+
+// Reverse direction — populate builder rows from an existing schema document.
+// Best effort: any widget shape we don't recognise just falls back to "text".
+function schemaBuilderLoadFromSchema(schema) {
+    if (!schema || typeof schema !== 'object' || schema.type !== 'object' || !schema.properties) {
+        // Unsupported root — keep builder empty so user can stay in JSON mode.
+        __sbFields = [];
+        schemaBuilderRender();
+        return;
+    }
+    const requiredSet = new Set(Array.isArray(schema.required) ? schema.required : []);
+    __sbFields = [];
+    Object.entries(schema.properties).forEach(([key, def]) => {
+        const widget = detectWidget(def);
+        if (!widget) return;   // skip unsupported (e.g. nested object, oneOf) — kept in Raw JSON
+        __sbFields.push({
+            id: ++__sbSeq,
+            name: key,
+            title: def.title || '',
+            widget: widget.key,
+            required: requiredSet.has(key),
+            defaultVal: def.default != null ? String(def.default) : '',
+            options: widget.key === 'multi'    ? (def.items && def.items.enum || []).join(', ')
+                  : widget.key === 'dropdown'  ? (def.enum || []).join(', ')
+                  : '',
+            min: def.minimum != null ? String(def.minimum) : '',
+            max: def.maximum != null ? String(def.maximum) : '',
+            pattern: def.pattern || '',
+            description: def.description || ''
+        });
+    });
+    schemaBuilderRender();
+    schemaBuilderSync();
+}
+
+function detectWidget(def) {
+    if (!def || typeof def !== 'object') return null;
+    if (def.oneOf || def.anyOf) return null;       // discriminated → stay in JSON mode
+    if (def.type === 'object') return null;        // nested → JSON mode
+    if (def.type === 'array' && def.items && Array.isArray(def.items.enum)) {
+        return SB_WIDGETS.find(w => w.key === 'multi');
+    }
+    if (def.type === 'string' && Array.isArray(def.enum)) {
+        return SB_WIDGETS.find(w => w.key === 'dropdown');
+    }
+    if (def.type === 'boolean') return SB_WIDGETS.find(w => w.key === 'boolean');
+    if (def.type === 'integer') return SB_WIDGETS.find(w => w.key === 'integer');
+    if (def.type === 'number')  return SB_WIDGETS.find(w => w.key === 'number');
+    if (def.type === 'string' || def.type === undefined) {
+        const byFmt = SB_WIDGETS.find(w => w.format === def.format);
+        return byFmt || SB_WIDGETS.find(w => w.key === 'text');
+    }
+    return null;
+}
+
+function switchSchemaMode(mode) {
+    __sbMode = mode;
+    const builder = document.getElementById('ct-builder');
+    const json    = document.getElementById('ct-schema-wrap');
+    const bBtn    = document.getElementById('ct-mode-builder-btn');
+    const jBtn    = document.getElementById('ct-mode-json-btn');
+    if (!builder || !json) return;
+    if (mode === 'json') {
+        // Builder → JSON: ensure the textarea is up to date with whatever the
+        // builder currently shows, then reveal the textarea for free editing.
+        schemaBuilderSync();
+        builder.classList.add('hidden');
+        json.classList.remove('hidden');
+        bBtn.classList.remove('bg-white','shadow-sm');
+        jBtn.classList.add('bg-white','shadow-sm');
+    } else {
+        // JSON → Builder: best-effort reverse-load. Anything unsupported is left
+        // untouched in the textarea (user can keep editing it as Raw JSON).
+        const ta = document.getElementById('ct-schema');
+        try { schemaBuilderLoadFromSchema(JSON.parse(ta.value || '{}')); } catch { /* keep current */ }
+        builder.classList.remove('hidden');
+        json.classList.add('hidden');
+        jBtn.classList.remove('bg-white','shadow-sm');
+        bBtn.classList.add('bg-white','shadow-sm');
+    }
+}
+
+// Seed the builder with the same default the textarea ships with, so opening
+// the modal already shows e-mail / fullName / active rows.
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        const initial = JSON.parse(document.getElementById('ct-schema').value);
+        schemaBuilderLoadFromSchema(initial);
+    } catch { schemaBuilderRender(); }
+});
 
 // ============== Ingest / update an entry ==============
 async function ingestEntry(name) {
