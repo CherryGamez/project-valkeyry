@@ -300,6 +300,7 @@
         <button class="tab-btn active" data-tab="tables" data-testid="tab-tables" onclick="switchTab('tables')">Virtual Tables</button>
         <button class="tab-btn" data-tab="audit"   data-testid="tab-audit"   onclick="switchTab('audit')">Audit Timeline</button>
         <button class="tab-btn" data-tab="webhooks" data-testid="tab-webhooks" onclick="switchTab('webhooks')">Webhooks</button>
+        <button class="tab-btn" data-tab="endpoints" data-testid="tab-endpoints" onclick="switchTab('endpoints')">Endpoints &amp; URLs</button>
         <div class="ml-auto flex items-center gap-3 text-[11px] text-ink-500 font-mono">
             <span class="htmx-indicator inline-flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-full bg-ios-orange animate-pulse"></span> syncing…
@@ -434,6 +435,43 @@
             <div id="webhook-content" data-testid="webhook-content"
                  data-template="webhook-tpl">
                 <div class="text-[13px] text-ink-500 italic px-2 py-3">Connect to a tenant to load webhook subscriptions.</div>
+            </div>
+        </div>
+
+        <!-- ============== TAB: ENDPOINTS & URLs ============== -->
+        <div id="tab-endpoints" class="tab-pane hidden" data-testid="tab-pane-endpoints">
+            <div class="ios-card p-6 mb-5">
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-[18px] font-semibold tracking-tight">Endpoints &amp; URLs</h2>
+                    <button id="refresh-endpoints-btn" data-testid="refresh-endpoints-btn"
+                            onclick="renderEndpointsTab()"
+                            class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
+                </div>
+                <p class="text-[13px] text-ink-500 mb-4">Every URL exposed by this environment, scoped to the active tenant. Click <span class="font-mono text-ink-700">Copy</span> for clipboard, <span class="font-mono text-ink-700">Try</span> to fire the request against the live server and see the JSON response inline.</p>
+
+                <div class="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5">
+                    <!-- Left: list of endpoints -->
+                    <div id="endpoints-list" data-testid="endpoints-list" class="grid gap-2.5">
+                        <div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="endpoints-empty">
+                            Connect to a tenant to populate this page.
+                        </div>
+                    </div>
+
+                    <!-- Right: live response viewer -->
+                    <aside class="ios-card p-4 self-start sticky top-[124px] grid gap-2 bg-card-sub" data-testid="endpoints-response-pane">
+                        <div class="flex items-center justify-between">
+                            <div class="section-label">Live response</div>
+                            <button onclick="endpointsClearResponse()" data-testid="endpoints-clear-btn"
+                                    class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">Clear</button>
+                        </div>
+                        <div id="endpoints-req-line" data-testid="endpoints-req-line"
+                             class="font-mono text-[11px] text-ink-500 break-all">No request yet — press <strong>Try</strong> on any GET endpoint.</div>
+                        <div id="endpoints-status" data-testid="endpoints-status" class="hidden text-[12px]"></div>
+                        <pre id="endpoints-body" data-testid="endpoints-body"
+                             class="json-box max-h-[60vh] overflow-auto scrollbar text-[12px]"
+                             style="min-height: 200px;">(awaiting response)</pre>
+                    </aside>
+                </div>
             </div>
         </div>
 
@@ -799,8 +837,9 @@ function isRollbackable(r) {
 function switchTab(name) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('hidden', p.id !== 'tab-' + name));
-    if (name === 'audit')    loadAudit();
-    if (name === 'webhooks') loadWebhooks();
+    if (name === 'audit')     loadAudit();
+    if (name === 'webhooks')  loadWebhooks();
+    if (name === 'endpoints') renderEndpointsTab();
 }
 
 // ============== Connection / auth modal ==============
@@ -849,6 +888,171 @@ function loadEntries(name) {
 
 function apiBase() {
     return '/api/v1/tenants/' + encodeURIComponent(getConn().tenantId);
+}
+
+// =====================================================================
+// Endpoints & URLs tab
+// ---------------------------------------------------------------------
+// Surfaces every URL a developer needs for this environment + tenant.
+// Renders into #endpoints-list; "Try" invocations stream into the
+// right-hand live-response pane (#endpoints-body) so users see the JSON
+// without leaving the page.
+// =====================================================================
+function endpointCatalog() {
+    const t = getConn().tenantId || '<tenant-id>';
+    const base = '/api/v1/tenants/' + encodeURIComponent(t);
+    // Each entry: { group, method, path, summary, tryable }
+    return [
+        // Discovery
+        { group:'Discovery & Docs', method:'GET', path:'/swagger-ui.html',                     summary:'Interactive API console (Swagger UI)',  tryable:false, open:true },
+        { group:'Discovery & Docs', method:'GET', path:'/v3/api-docs',                         summary:'OpenAPI 3 contract (JSON)',             tryable:true },
+        { group:'Discovery & Docs', method:'GET', path:'/v3/api-docs.yaml',                    summary:'OpenAPI 3 contract (YAML)',             tryable:false, open:true },
+        { group:'Discovery & Docs', method:'GET', path:'/actuator/health',                     summary:'Liveness / readiness',                  tryable:true,  noAuth:true },
+        { group:'Discovery & Docs', method:'GET', path:'/actuator/info',                       summary:'Build & git metadata',                  tryable:true,  noAuth:true },
+
+        // Tables
+        { group:'Virtual Tables',    method:'GET',    path: base + '/tables',                                summary:'List all virtual tables',          tryable:true },
+        { group:'Virtual Tables',    method:'POST',   path: base + '/tables',                                summary:'Declare a new virtual table',       tryable:false },
+        { group:'Virtual Tables',    method:'GET',    path: base + '/tables/{name}',                         summary:'Fetch a single table + its schema', tryable:false },
+
+        // Entries
+        { group:'Entries (records)', method:'GET',    path: base + '/tables/{name}/entries',                 summary:'List entries (paged)',              tryable:false },
+        { group:'Entries (records)', method:'POST',   path: base + '/tables/{name}/entries',                 summary:'Ingest a single entry',             tryable:false },
+        { group:'Entries (records)', method:'POST',   path: base + '/tables/{name}/entries:batch',           summary:'Ingest a batch of entries',         tryable:false },
+        { group:'Entries (records)', method:'GET',    path: base + '/tables/{name}/entries/{recordKey}',     summary:'Fetch one entry by record key',     tryable:false },
+        { group:'Entries (records)', method:'DELETE', path: base + '/tables/{name}/entries/{recordKey}',     summary:'Soft-delete an entry',              tryable:false },
+        { group:'Entries (records)', method:'GET',    path: base + '/tables/{name}/entries/{recordKey}/history', summary:'Full version history of an entry', tryable:false },
+        { group:'Entries (records)', method:'POST',   path: base + '/tables/{name}/search',                  summary:'Filter entries by JSONPath / JSONB query', tryable:false },
+
+        // Audit
+        { group:'Audit',             method:'GET',    path: base + '/audit',                                 summary:'Append-only audit ledger',          tryable:true },
+        { group:'Audit',             method:'POST',   path: base + '/audit/{auditId}/rollback',              summary:'Restore prior state as a new version', tryable:false },
+
+        // Webhooks
+        { group:'Webhooks',          method:'GET',    path: base + '/webhooks',                              summary:'List webhook subscriptions',        tryable:true },
+        { group:'Webhooks',          method:'POST',   path: base + '/webhooks',                              summary:'Register a new webhook target',     tryable:false },
+        { group:'Webhooks',          method:'DELETE', path: base + '/webhooks/{id}',                         summary:'Remove a webhook subscription',     tryable:false }
+    ];
+}
+
+function renderEndpointsTab() {
+    const host = document.getElementById('endpoints-list');
+    if (!host) return;
+    const conn = getConn();
+    if (!conn.tenantId) {
+        host.innerHTML = '<div class="text-[13px] text-ink-500 italic px-2 py-3" data-testid="endpoints-empty">Connect to a tenant to populate this page.</div>';
+        return;
+    }
+    const catalog = endpointCatalog();
+    const groups  = [...new Set(catalog.map(c => c.group))];
+    const origin  = window.location.origin;
+
+    host.innerHTML = groups.map(g => `
+        <div class="ios-card p-4" data-testid="endpoints-group-${cssId(g)}">
+            <div class="flex items-center justify-between mb-2.5">
+                <div class="text-[13px] font-semibold tracking-tight">${escapeHtml(g)}</div>
+                <div class="text-[11px] text-ink-500">${catalog.filter(c => c.group === g).length} endpoint(s)</div>
+            </div>
+            <div class="grid gap-2">
+                ${catalog.filter(c => c.group === g).map((e, i) => endpointRow(e, origin, cssId(g) + '-' + i)).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function endpointRow(e, origin, rowId) {
+    const fullUrl = origin + e.path;
+    const methodCls = ({
+        GET:    'bg-[#E4F1FF] text-[#0A66C2]',
+        POST:   'bg-[#E0F8E9] text-[#1E7B41]',
+        DELETE: 'bg-[#FFE5E1] text-[#B8311F]',
+        PUT:    'bg-[#FFF1D9] text-[#9A6500]',
+        PATCH:  'bg-[#FFF1D9] text-[#9A6500]'
+    })[e.method] || 'bg-ink-100 text-ink-700';
+    const hasPlaceholder = e.path.includes('{');
+    const showTry = e.tryable && !hasPlaceholder;
+    return `
+        <div class="grid gap-1.5 px-2 py-2 rounded-card border border-hairline bg-white" data-testid="endpoint-row-${rowId}">
+            <div class="flex items-center gap-2.5 flex-wrap">
+                <span class="font-mono text-[10px] font-bold tracking-wider px-2 py-0.5 rounded ${methodCls}" data-testid="endpoint-method-${rowId}">${e.method}</span>
+                <code class="font-mono text-[12px] text-ink-900 break-all flex-1 min-w-[200px]" data-testid="endpoint-path-${rowId}">${escapeHtml(e.path)}</code>
+                <div class="flex gap-1.5">
+                    <button onclick="endpointsCopy('${escapeHtml(fullUrl)}', this)" data-testid="endpoint-copy-${rowId}"
+                            class="btn-ghost press text-[11px] px-2.5 py-1 border border-hairline rounded-pill">Copy</button>
+                    ${e.open ? `
+                    <a href="${escapeHtml(e.path)}" target="_blank" rel="noopener" data-testid="endpoint-open-${rowId}"
+                       class="btn-ghost press text-[11px] px-2.5 py-1 border border-hairline rounded-pill no-underline">Open ↗</a>` : ''}
+                    ${showTry ? `
+                    <button onclick="endpointsTry('${e.method}','${escapeHtml(e.path)}', ${e.noAuth ? 'true' : 'false'})" data-testid="endpoint-try-${rowId}"
+                            class="btn-primary press text-[11px] px-2.5 py-1">Try</button>` : ''}
+                </div>
+            </div>
+            <div class="text-[11px] text-ink-500" data-testid="endpoint-summary-${rowId}">${escapeHtml(e.summary)}${hasPlaceholder ? ' <span class="text-[10px] italic">— path placeholders, use Swagger UI to invoke</span>' : ''}</div>
+        </div>`;
+}
+
+function cssId(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+
+async function endpointsTry(method, path, noAuth) {
+    const t0 = performance.now();
+    setReqLine(method, path);
+    setStatus('… in flight', 'bg-ink-100 text-ink-700');
+    setBody('(awaiting response)');
+    try {
+        const opts = { method };
+        const res  = noAuth
+            ? await fetch(path, opts)
+            : await apiFetch(path, opts);
+        const dt   = Math.round(performance.now() - t0);
+        const txt  = await res.text();
+        let pretty;
+        try { pretty = JSON.stringify(JSON.parse(txt), null, 2); }
+        catch { pretty = txt || '(empty body)'; }
+        const cls = res.ok ? 'bg-[#E0F8E9] text-[#1E7B41]'
+                   : res.status >= 400 && res.status < 500 ? 'bg-[#FFF1D9] text-[#9A6500]'
+                   : 'bg-[#FFE5E1] text-[#B8311F]';
+        setStatus(`${res.status} ${res.statusText || ''} · ${dt} ms`, cls);
+        setBody(pretty);
+    } catch (e) {
+        setStatus('Network error', 'bg-[#FFE5E1] text-[#B8311F]');
+        setBody(String(e));
+    }
+    function setReqLine(m, p) {
+        const el = document.getElementById('endpoints-req-line');
+        if (el) el.innerHTML = `<strong>${escapeHtml(m)}</strong> ${escapeHtml(p)}`;
+    }
+    function setStatus(msg, cls) {
+        const el = document.getElementById('endpoints-status');
+        if (!el) return;
+        el.className = 'text-[12px] inline-flex items-center px-2 py-0.5 rounded font-mono ' + cls;
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
+    function setBody(s) {
+        const el = document.getElementById('endpoints-body');
+        if (el) el.textContent = s;
+    }
+}
+
+function endpointsClearResponse() {
+    const line = document.getElementById('endpoints-req-line');
+    const stat = document.getElementById('endpoints-status');
+    const body = document.getElementById('endpoints-body');
+    if (line) line.innerHTML = 'No request yet — press <strong>Try</strong> on any GET endpoint.';
+    if (stat) stat.classList.add('hidden');
+    if (body) body.textContent = '(awaiting response)';
+}
+
+async function endpointsCopy(text, btn) {
+    try {
+        await navigator.clipboard.writeText(text);
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        btn.classList.add('bg-[#E0F8E9]');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('bg-[#E0F8E9]'); }, 1200);
+    } catch {
+        toast('Clipboard blocked — select & copy manually', true);
+    }
 }
 
 // ============== Declare a virtual table ==============
@@ -960,13 +1164,16 @@ async function selectTable(name) {
           <button type="button" id="mode-json-btn" data-testid="mode-json-btn"
                   onclick="switchEntryMode('json')"
                   class="press text-[12px] px-3 py-1.5 rounded-pill border border-hairline">Raw JSON (advanced)</button>
+          <button type="button" id="mode-batch-btn" data-testid="mode-batch-btn"
+                  onclick="switchEntryMode('batch')"
+                  class="press text-[12px] px-3 py-1.5 rounded-pill border border-hairline">Batch (list)</button>
         </div>
 
         <form id="entry-form" onsubmit="event.preventDefault(); ingestEntry('${escapeHtml(name)}')"
               class="grid gap-3" data-testid="entry-form">
-          <label class="grid gap-1.5">
+          <label class="grid gap-1.5" id="entry-key-wrap">
             <span class="section-label">Record key</span>
-            <input id="entry-key" required placeholder="alice@acme.io" data-testid="entry-key-input"
+            <input id="entry-key" placeholder="alice@acme.io" data-testid="entry-key-input"
                    class="ios-input font-mono text-[13px] max-w-[420px]"/>
           </label>
 
@@ -980,14 +1187,43 @@ async function selectTable(name) {
                       class="ios-input font-mono text-[12px]" style="background:#F9F9FB;">${schema ? escapeHtml(sampleFromSchema(schema)) : '{}'}</textarea>
           </label>
 
+          <!-- Batch (list of entries) textarea (hidden by default) -->
+          <label class="grid gap-1.5 hidden" id="entry-batch-wrap">
+            <span class="section-label">Batch payload <span class="text-ink-500 normal-case font-normal">(JSON array of <span class="font-mono text-ink-700">{recordKey, data}</span> objects)</span></span>
+            <textarea id="entry-batch" rows="10" data-testid="entry-batch-input"
+                      class="ios-input font-mono text-[12px]" style="background:#F9F9FB;">${schema ? escapeHtml(sampleBatchFromSchema(schema)) : '[]'}</textarea>
+          </label>
+
           <div class="flex justify-end">
-            <button type="submit" data-testid="entry-submit-btn"
+            <button type="submit" id="entry-submit-btn" data-testid="entry-submit-btn"
                     class="btn-primary press px-5 py-2.5 text-[13px]">
               Save entry
             </button>
           </div>
         </form>
         <div id="entry-error" data-testid="entry-error" class="hidden mt-3"></div>
+
+        <!-- ============= Live API response preview ============= -->
+        <div id="entry-live-response" data-testid="entry-live-response"
+             class="mt-5 grid gap-2 rounded-card border border-hairline bg-card-sub p-4 hidden">
+            <div class="flex items-center justify-between">
+                <div class="section-label">Live API response</div>
+                <div class="flex items-center gap-2">
+                    <span id="elr-status" data-testid="elr-status" class="text-[11px] font-mono inline-flex items-center px-2 py-0.5 rounded"></span>
+                    <button onclick="clearLiveResponse()" data-testid="elr-clear-btn"
+                            class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">Clear</button>
+                </div>
+            </div>
+            <div id="elr-req-line" data-testid="elr-req-line" class="font-mono text-[11px] text-ink-500 break-all"></div>
+            <details open class="text-[12px]">
+                <summary class="cursor-pointer text-ink-500 hover:text-ios-blue">Request body</summary>
+                <pre id="elr-req-body" data-testid="elr-req-body" class="json-box mt-1.5 max-h-[180px] overflow-auto scrollbar text-[11px]"></pre>
+            </details>
+            <details open class="text-[12px]">
+                <summary class="cursor-pointer text-ink-500 hover:text-ios-blue">Response body</summary>
+                <pre id="elr-res-body" data-testid="elr-res-body" class="json-box mt-1.5 max-h-[280px] overflow-auto scrollbar text-[11px]"></pre>
+            </details>
+        </div>
       </div>
 
       <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
@@ -1335,24 +1571,41 @@ function collectFormValues(container) {
 }
 
 // =====================================================================
-// Editor-mode toggle (Form ⇄ Raw JSON)
+// Editor-mode toggle (Form ⇄ Raw JSON ⇄ Batch)
 // =====================================================================
 function switchEntryMode(mode) {
-    const fields = document.getElementById('entry-form-fields');
-    const wrap   = document.getElementById('entry-data-wrap');
-    const ta     = document.getElementById('entry-data');
-    const bForm  = document.getElementById('mode-form-btn');
-    const bJson  = document.getElementById('mode-json-btn');
-    if (!fields || !wrap || !ta) return;
+    const fields    = document.getElementById('entry-form-fields');
+    const wrap      = document.getElementById('entry-data-wrap');
+    const batchWrap = document.getElementById('entry-batch-wrap');
+    const keyWrap   = document.getElementById('entry-key-wrap');
+    const ta        = document.getElementById('entry-data');
+    const bForm     = document.getElementById('mode-form-btn');
+    const bJson     = document.getElementById('mode-json-btn');
+    const bBatch    = document.getElementById('mode-batch-btn');
+    const submitBtn = document.getElementById('entry-submit-btn');
+    if (!fields || !wrap || !ta || !batchWrap || !keyWrap) return;
+
+    [bForm, bJson, bBatch].forEach(b => b && b.classList.remove('bg-white'));
+
     if (mode === 'json') {
-        // Going Form → JSON: copy the form's current state into the textarea.
         try { ta.value = JSON.stringify(collectFormValues(fields), null, 2); } catch {/* ignore */}
         fields.classList.add('hidden');
+        batchWrap.classList.add('hidden');
+        keyWrap.classList.remove('hidden');
         wrap.classList.remove('hidden');
         ta.required = true;
-        bForm.classList.remove('bg-white'); bJson.classList.add('bg-white');
+        if (submitBtn) submitBtn.textContent = 'Save entry';
+        bJson && bJson.classList.add('bg-white');
+    } else if (mode === 'batch') {
+        // Hide the single-entry form, show the array textarea, switch the submit label.
+        fields.classList.add('hidden');
+        wrap.classList.add('hidden');
+        keyWrap.classList.add('hidden');     // batch payload already contains its own recordKeys
+        batchWrap.classList.remove('hidden');
+        ta.required = false;
+        if (submitBtn) submitBtn.textContent = 'Save batch';
+        bBatch && bBatch.classList.add('bg-white');
     } else {
-        // Going JSON → Form: try to parse the textarea back into the form widgets.
         if (window.__currentSchema) {
             try {
                 const parsed = JSON.parse(ta.value || '{}');
@@ -1361,8 +1614,11 @@ function switchEntryMode(mode) {
         }
         fields.classList.remove('hidden');
         wrap.classList.add('hidden');
+        batchWrap.classList.add('hidden');
+        keyWrap.classList.remove('hidden');
         ta.required = false;
-        bJson.classList.remove('bg-white'); bForm.classList.add('bg-white');
+        if (submitBtn) submitBtn.textContent = 'Save entry';
+        bForm && bForm.classList.add('bg-white');
     }
     window.__entryMode = mode;
 }
@@ -1832,30 +2088,138 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ============== Ingest / update an entry ==============
 async function ingestEntry(name) {
+    // Batch mode? Delegate.
+    if (window.__entryMode === 'batch') return ingestBatch(name);
+
     const recordKey = document.getElementById('entry-key').value.trim();
+    if (!recordKey) {
+        showInlineError('entry-error', { detail: 'Record key is required' });
+        return;
+    }
     const raw = document.getElementById('entry-data').value;
     let data;
     try { data = JSON.parse(raw); }
     catch (e) { showInlineError('entry-error', { detail: 'Data is not valid JSON: ' + e.message }); return; }
-    const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name) + '/entries', {
+
+    const url    = apiBase() + '/tables/' + encodeURIComponent(name) + '/entries';
+    const body   = { recordKey, data };
+    const t0     = performance.now();
+    const res    = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ recordKey, data })
+        body: JSON.stringify(body)
     });
+    const dtMs   = Math.round(performance.now() - t0);
+    const text   = await res.text();
+    let respJson;
+    try { respJson = JSON.parse(text); } catch { respJson = text; }
+    // Render the live request/response panel right under the form so the user
+    // sees exactly what came back without losing scroll position.
+    showLiveResponse('POST', url, body, res, respJson, dtMs);
+
     if (res.status === 201) {
         document.getElementById('entry-error').classList.add('hidden');
         document.getElementById('entry-key').value = '';
         toast('Entry "' + recordKey + '" saved');
         loadEntries(name);
     } else if (res.status === 409) {
-        const err = await res.json().catch(() => ({}));
-        toast(err.detail || 'Duplicate — idempotency guard skipped this write', true);
+        toast((respJson && respJson.detail) || 'Duplicate — idempotency guard skipped this write', true);
         loadEntries(name);
     } else {
-        const err = await res.json().catch(() => ({}));
-        if (res.status === 422 && err.violations) renderSchemaErrors(err);
-        else showInlineError('entry-error', err);
+        if (res.status === 422 && respJson && respJson.violations) renderSchemaErrors(respJson);
+        else showInlineError('entry-error', respJson || {});
     }
+}
+
+// ============== Batch ingest (list of entries in one call) ==============
+async function ingestBatch(name) {
+    const raw = document.getElementById('entry-batch').value;
+    let arr;
+    try { arr = JSON.parse(raw); }
+    catch (e) { showInlineError('entry-error', { detail: 'Batch is not valid JSON: ' + e.message }); return; }
+    if (!Array.isArray(arr)) {
+        showInlineError('entry-error', { detail: 'Batch payload must be a JSON array of {recordKey, data} objects' });
+        return;
+    }
+    if (arr.length === 0) {
+        showInlineError('entry-error', { detail: 'Batch is empty — add at least one {recordKey, data} object' });
+        return;
+    }
+    const bad = arr.findIndex(x => !x || typeof x !== 'object' || !x.recordKey || x.data === undefined);
+    if (bad >= 0) {
+        showInlineError('entry-error', { detail: `Item #${bad} is missing "recordKey" or "data"` });
+        return;
+    }
+
+    const url   = apiBase() + '/tables/' + encodeURIComponent(name) + '/entries:batch';
+    const t0    = performance.now();
+    const res   = await apiFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(arr)
+    });
+    const dtMs  = Math.round(performance.now() - t0);
+    const text  = await res.text();
+    let respJson;
+    try { respJson = JSON.parse(text); } catch { respJson = text; }
+    showLiveResponse('POST', url, arr, res, respJson, dtMs);
+
+    if (res.ok) {
+        document.getElementById('entry-error').classList.add('hidden');
+        const summary = Array.isArray(respJson)
+            ? `Batch accepted — ${respJson.length} record(s)`
+            : 'Batch accepted';
+        toast(summary);
+        loadEntries(name);
+    } else {
+        showInlineError('entry-error', respJson || { detail: 'Batch failed: ' + res.status });
+    }
+}
+
+// Build a tiny array payload for the batch textarea seed, derived from the schema sample.
+function sampleBatchFromSchema(schema) {
+    let sample;
+    try { sample = JSON.parse(sampleFromSchema(schema)); } catch { sample = {}; }
+    return JSON.stringify([
+        { recordKey: 'sample-1', data: sample },
+        { recordKey: 'sample-2', data: sample }
+    ], null, 2);
+}
+
+// Render a request/response pair into the #entry-live-response panel.
+function showLiveResponse(method, url, requestBody, response, responseBody, dtMs) {
+    const host = document.getElementById('entry-live-response');
+    if (!host) return;
+    host.classList.remove('hidden');
+
+    const status = document.getElementById('elr-status');
+    const reqLn  = document.getElementById('elr-req-line');
+    const reqB   = document.getElementById('elr-req-body');
+    const resB   = document.getElementById('elr-res-body');
+
+    const ok    = response.ok;
+    const cls4  = response.status >= 400 && response.status < 500;
+    const cls   = ok          ? 'bg-[#E0F8E9] text-[#1E7B41]'
+                : cls4        ? 'bg-[#FFF1D9] text-[#9A6500]'
+                              : 'bg-[#FFE5E1] text-[#B8311F]';
+    status.className = 'text-[11px] font-mono inline-flex items-center px-2 py-0.5 rounded ' + cls;
+    status.textContent = response.status + ' ' + (response.statusText || '') + ' · ' + dtMs + ' ms';
+
+    reqLn.innerHTML = `<strong>${escapeHtml(method)}</strong> ${escapeHtml(url)}`;
+    reqB.textContent = (requestBody === undefined || requestBody === null)
+        ? '(no body)'
+        : (typeof requestBody === 'string' ? requestBody : JSON.stringify(requestBody, null, 2));
+    resB.textContent = (responseBody === undefined || responseBody === null || responseBody === '')
+        ? '(empty body)'
+        : (typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2));
+
+    // Scroll the panel into view so the user sees the JSON without hunting for it.
+    setTimeout(() => host.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+}
+
+function clearLiveResponse() {
+    const host = document.getElementById('entry-live-response');
+    if (host) host.classList.add('hidden');
 }
 
 function editEntry(recordKey, btn) {

@@ -22,6 +22,7 @@
         <testcontainers.version>1.20.3</testcontainers.version>
         <mock-oauth2-server.version>2.1.10</mock-oauth2-server.version>
         <json-schema-validator.version>1.5.3</json-schema-validator.version>
+        <springdoc.version>2.6.0</springdoc.version>
     </properties>
 
     <dependencies>
@@ -82,6 +83,13 @@
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
             <version>${json-schema-validator.version}</version>
+        </dependency>
+
+        <!-- OpenAPI 3 + Swagger-UI (WebFlux flavour) — surfaces /v3/api-docs and /swagger-ui.html -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+            <version>${springdoc.version}</version>
         </dependency>
 
         <!-- Test -->

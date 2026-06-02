@@ -51,6 +51,10 @@ public class SecurityConfig {
                 .pathMatchers(HttpMethod.GET, "/actuator/health", "/actuator/info").permitAll()
                 // Static audit console (the API calls it makes are still authenticated)
                 .pathMatchers(HttpMethod.GET, "/", "/audit", "/audit/**", "/favicon.ico").permitAll()
+                // OpenAPI / Swagger UI — public so devs can browse the contract without a token.
+                .pathMatchers(HttpMethod.GET,
+                        "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml",
+                        "/swagger-ui.html", "/swagger-ui/**", "/webjars/**").permitAll()
                 // Write operations require an explicit writer authority on top of tenant entitlement.
                 .pathMatchers(HttpMethod.POST,   "/api/v1/tenants/**").hasAuthority("ROLE_VALKEYRY_WRITER")
                 .pathMatchers(HttpMethod.PUT,    "/api/v1/tenants/**").hasAuthority("ROLE_VALKEYRY_WRITER")

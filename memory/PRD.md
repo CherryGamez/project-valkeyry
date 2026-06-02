@@ -177,3 +177,72 @@ JWT auth tracks the security layer already supports.
 - P2 — Builder support for **`oneOf` / discriminated variants**.
 - P2 — Persist the user's last-used editor mode (Builder vs Raw JSON) in
   `localStorage` so the modal reopens in their preferred view.
+
+### 2026-02-13 (afternoon) — Endpoints & URLs tab + live API-response preview
+**Problem**: users had no single place to discover every URL the running
+environment exposes (including Swagger), and after ingesting a config item
+they had to flip to a separate terminal / curl to see the actual JSON the
+server returned.
+
+**What shipped**
+1. **Swagger UI / OpenAPI 3** wired into the Spring Boot app.
+   - `valkeyry-config/pom.xml` — added `springdoc-openapi-starter-webflux-ui:2.6.0`.
+   - `valkeyry-config/src/main/java/io/valkeyry/config/config/OpenApiConfig.java` (new)
+     — declares `OpenAPI` bean with both `apiKey` (`X-API-Key`) and `bearerAuth`
+     security schemes so devs can "Authorize" in either track.
+   - `SecurityConfig.java` — permit-all on `/swagger-ui*`, `/v3/api-docs*`,
+     `/webjars/**` so the docs load without a token.
+2. **New "Endpoints & URLs" tab in the GUI** (`index.html`).
+   - 20-row catalog grouped by category: *Discovery & Docs · Virtual Tables ·
+     Entries · Audit · Webhooks*.
+   - Each row shows method-badge, full path, summary, **Copy** button,
+     **Open ↗** for browser-friendly URLs (Swagger UI, OpenAPI YAML), and a
+     **Try** button for safe GETs that fires the request and renders the
+     full JSON response in the right-hand sticky "Live response" pane
+     (status code, latency, pretty JSON body).
+3. **Live API-response panel under the entry editor.**
+   - After every single-entry POST *or* batch POST, the panel below the
+     form expands with: HTTP status badge (green/amber/red), exact
+     `METHOD URL`, the request body, and the server's full JSON response —
+     visible without leaving the page.
+4. **New "Batch (list)" editor mode.**
+   - Third toggle next to *Form* and *Raw JSON*. Accepts a JSON array of
+     `{recordKey, data}` objects and POSTs to the existing
+     `/tables/{name}/entries:batch` endpoint. Seed payload auto-generated
+     from the active schema. Same live-response panel renders the array of
+     server-side `VirtualTableEntry` rows.
+5. **Docs updated** — `WINDOWS_TEST_GUIDE.md` and `MAC_TEST_GUIDE.md` now
+   call out the Swagger / OpenAPI URLs and point users to the new tab.
+
+**Testing performed**
+- `node --check` on the rewritten JS: PASS.
+- Playwright smoke against the static HTML (served via Python http.server,
+  with `window.fetch` mocked to return canned 201s):
+  - Endpoints tab: **5 groups, 20 rows** rendered, 6 Try buttons, 20 Copy
+    buttons. Try on `/v3/api-docs` correctly streamed the (mock 404) body
+    into the right-hand pane with status badge + latency. ✅
+  - Single ingest: live-response panel expanded with `201 · 0 ms`, exact
+    `POST /api/v1/tenants/demo-tenant/tables/customers/entries`, request
+    body + full response JSON (id/version/recordVersion/dataHash/createdAt). ✅
+  - Batch ingest: submit label flipped to *Save batch*, panel rendered the
+    JSON array of inserted records, toast confirmed "Batch accepted — 2
+    record(s)". ✅
+- Java code visually validated; JVM still unavailable in this pod, so the
+  Swagger-UI endpoint itself wasn't reachable here — please verify on a
+  JDK-21 host that `/swagger-ui.html` renders.
+
+**Files touched (this iteration)**
+- `valkeyry-config/pom.xml` (springdoc dependency + property)
+- `valkeyry-config/src/main/java/io/valkeyry/config/config/OpenApiConfig.java` (new)
+- `valkeyry-config/src/main/java/io/valkeyry/config/security/SecurityConfig.java`
+- `valkeyry-config/src/main/resources/static/index.html` (+ Endpoints tab, +Batch mode, +live-response panel — ~300 lines)
+- `valkeyry-config/WINDOWS_TEST_GUIDE.md` & `MAC_TEST_GUIDE.md` (Swagger sections)
+
+**Next / Backlog**
+- P1 — JVM smoke on a host: hit `/swagger-ui.html` + `/v3/api-docs` to
+  confirm springdoc auto-detected all four controllers.
+- P2 — Add **per-controller** `@Operation` / `@ApiResponses` annotations
+  so Swagger UI shows richer summaries instead of method-name defaults.
+- P2 — In the Endpoints tab, support **path-placeholder substitution**
+  (e.g. ask the user for `{name}`) so even templated GETs become tryable.
+- P2 — Persist a request history (last 10) in the live-response pane.

@@ -104,6 +104,22 @@ curl -s http://localhost:8081/actuator/health | jq
 # → {"status":"UP",...}
 ```
 
+### 3.1.1 OpenAPI / Swagger UI
+
+The app exposes a Swagger console + the raw OpenAPI 3 contract — both
+public, no auth header required:
+
+| URL                                       | What it gives you                  |
+|-------------------------------------------|------------------------------------|
+| `http://localhost:8081/swagger-ui.html`   | Interactive console (with *Authorize*: paste your API key or JWT) |
+| `http://localhost:8081/v3/api-docs`       | OpenAPI 3 contract (JSON)          |
+| `http://localhost:8081/v3/api-docs.yaml`  | OpenAPI 3 contract (YAML)          |
+
+You can also reach the same URLs (and every per-tenant endpoint) from the
+**Endpoints & URLs** tab in the UI — each row has a **Copy** button and,
+for safe GETs, a **Try** button that fires the request and shows the JSON
+response *inline* on that page.
+
 ### 3.2 Auth tracks at a glance
 
 | Track       | Header                                       | Tenant resolution                |
