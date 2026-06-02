@@ -1,5 +1,10 @@
 package io.valkeyry.config.api;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import io.valkeyry.config.security.TenantAccessGuard;
 import io.valkeyry.config.service.ConfigAuditService;
 import org.springframework.security.core.Authentication;
@@ -19,6 +24,7 @@ import reactor.core.publisher.Flux;
  */
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/audit")
+@Tag(name = "Audit", description = "Browse the append-only change ledger.")
 public class AuditController {
 
     private final ConfigAuditService audit;
@@ -30,10 +36,16 @@ public class AuditController {
     }
 
     @GetMapping
+    @Operation(summary = "Browse audit entries",
+               description = "Returns the most-recent N audit rows. Optional query params narrow the result to a single table, a single record's full history, or every change by a given actor.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Entries returned (may be empty)"),
+        @ApiResponse(responseCode = "403", description = "Caller has no access to this tenant")
+    })
     public Flux<AuditView> browse(@PathVariable String tenantId,
-                                  @RequestParam(required = false) String tableName,
-                                  @RequestParam(required = false) String recordKey,
-                                  @RequestParam(required = false) String actor,
+                                  @Parameter(description = "Filter to one table") @RequestParam(required = false) String tableName,
+                                  @Parameter(description = "Combined with tableName, returns one record's full history") @RequestParam(required = false) String recordKey,
+                                  @Parameter(description = "Filter to one actor (email / subject)") @RequestParam(required = false) String actor,
                                   @RequestParam(defaultValue = "50") int limit,
                                   @RequestParam(defaultValue = "0")  int offset,
                                   Authentication auth) {

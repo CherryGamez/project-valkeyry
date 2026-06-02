@@ -1,0 +1,18 @@
+endpoint: ${VALKEYRY_ENDPOINT:http://localhost:8081}
+tenant:   ${VALKEYRY_TENANT:demo-tenant}
+auth:
+  type:   api-key
+  apiKey: ${VALKEYRY_API_KEY:plugin-test-key}
+
+tables:
+  - name: routing_rules
+    schemaInline:
+      type: object
+      required: [pattern, destination]
+      properties:
+        pattern:     { type: string }
+        destination: { type: string, enum: [ "primary", "fallback", "blackhole" ] }
+        priority:    { type: integer, minimum: 0, maximum: 1000, default: 100 }
+        active:      { type: boolean, default: true }
+      additionalProperties: false
+    entries: data/*.json

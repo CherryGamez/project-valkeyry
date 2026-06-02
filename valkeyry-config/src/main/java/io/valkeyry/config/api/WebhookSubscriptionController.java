@@ -1,5 +1,9 @@
 package io.valkeyry.config.api;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import io.valkeyry.config.security.TenantAccessGuard;
 import io.valkeyry.config.service.AuditWebhookSubscriptionService;
 import jakarta.validation.Valid;
@@ -22,6 +26,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/webhooks")
+@Tag(name = "Audit webhooks", description = "Register HTTPS endpoints that receive every audit event with an HMAC-SHA256 signature.")
 public class WebhookSubscriptionController {
 
     private final AuditWebhookSubscriptionService service;
@@ -33,11 +38,18 @@ public class WebhookSubscriptionController {
     }
 
     @GetMapping
+    @Operation(summary = "List webhook subscriptions for this tenant")
     public Flux<WebhookSubscriptionView> list(@PathVariable String tenantId, Authentication auth) {
         return guard.check(auth, tenantId).thenMany(service.list(tenantId));
     }
 
     @PostMapping
+    @Operation(summary = "Register a new webhook target",
+               description = "Body: `{ url, description?, secret? }`. The `secret` overrides the global HMAC key for this subscription. Duplicate URLs return 409.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "201", description = "Subscription created"),
+        @ApiResponse(responseCode = "409", description = "Duplicate URL already registered for this tenant")
+    })
     public Mono<ResponseEntity<WebhookSubscriptionView>> create(@PathVariable String tenantId,
                                                                 @Valid @RequestBody CreateWebhookSubscriptionRequest req,
                                                                 Authentication auth) {
@@ -47,6 +59,11 @@ public class WebhookSubscriptionController {
     }
 
     @DeleteMapping("/{id}")
+    @Operation(summary = "Remove a webhook subscription")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Subscription deleted"),
+        @ApiResponse(responseCode = "404", description = "Subscription id not found in this tenant")
+    })
     public Mono<ResponseEntity<Void>> remove(@PathVariable String tenantId,
                                              @PathVariable UUID id,
                                              Authentication auth) {

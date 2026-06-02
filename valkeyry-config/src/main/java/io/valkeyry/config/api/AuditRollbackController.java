@@ -3,6 +3,10 @@ package io.valkeyry.config.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.r2dbc.postgresql.codec.Json;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import io.valkeyry.config.error.VirtualTableNotFoundException;
 import io.valkeyry.config.repo.ConfigAuditRepository;
 import io.valkeyry.config.security.AuthTrack;
@@ -36,6 +40,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/audit")
+@Tag(name = "Audit rollback", description = "Restore an entry to a prior value referenced by an audit row.")
 public class AuditRollbackController {
 
     private final ConfigAuditRepository auditRepo;
@@ -54,6 +59,14 @@ public class AuditRollbackController {
     }
 
     @PostMapping("/{auditId}/rollback")
+    @Operation(summary = "Rollback an entry to a prior audit state",
+               description = "Re-ingests the `beforeValue` of the named audit row as a new version of the original record. Only record-level audit entries (with a non-null `recordKey` and `beforeValue`) are rollbackable.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "201", description = "Rollback applied — a new version was written"),
+        @ApiResponse(responseCode = "400", description = "Audit row is not rollbackable (table-level or has no prior value)"),
+        @ApiResponse(responseCode = "404", description = "Audit row not found in this tenant"),
+        @ApiResponse(responseCode = "409", description = "Idempotency-skip — record already at that state")
+    })
     public Mono<ResponseEntity<EntryView>> rollback(@PathVariable String tenantId,
                                                     @PathVariable UUID auditId,
                                                     Authentication auth,

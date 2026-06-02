@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Customer",
+  "type": "object",
+  "required": ["email"],
+  "properties": {
+    "email":    { "type": "string", "format": "email" },
+    "fullName": { "type": "string" },
+    "active":   { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}

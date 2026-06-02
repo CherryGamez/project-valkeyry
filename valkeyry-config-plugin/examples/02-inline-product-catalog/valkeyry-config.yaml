@@ -1,0 +1,48 @@
+endpoint: ${VALKEYRY_ENDPOINT:http://localhost:8081}
+tenant:   ${VALKEYRY_TENANT:demo-tenant}
+auth:
+  type:   api-key
+  apiKey: ${VALKEYRY_API_KEY:plugin-test-key}
+
+tables:
+  - name: products
+    schemaInline:
+      $schema: "https://json-schema.org/draft/2020-12/schema"
+      title:   "Product"
+      type:    object
+      required: [sku, name, price, category]
+      properties:
+        sku:
+          type:    string
+          title:   "SKU"
+          pattern: "^[A-Z]{3}-\\d{4}$"
+          description: "Three letters, dash, four digits — e.g. ABC-1234"
+        name:
+          type:    string
+          title:   "Display name"
+        price:
+          type:    number
+          title:   "Price (USD)"
+          minimum: 0
+          maximum: 999999.99
+        category:
+          type:    string
+          title:   "Category (dropdown)"
+          enum:    [apparel, electronics, books, home, toys]
+        tags:
+          type:        array
+          title:       "Tags (multi-choice)"
+          uniqueItems: true
+          items:
+            type: string
+            enum: [new, sale, clearance, exclusive, eco-friendly]
+        inStock:
+          type:    boolean
+          title:   "In stock"
+          default: true
+        launchedAt:
+          type:   string
+          format: date
+          title:  "Launch date"
+      additionalProperties: false
+    entries: data/*.json

@@ -1,0 +1,10 @@
+{
+  "recordKey": "dark.mode",
+  "data": {
+    "key": "dark.mode",
+    "enabled": true,
+    "rolloutPercent": 100,
+    "audiences": ["ga", "internal"],
+    "owner": "platform"
+  }
+}

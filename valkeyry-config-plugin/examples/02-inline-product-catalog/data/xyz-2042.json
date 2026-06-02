@@ -1,0 +1,12 @@
+{
+  "recordKey": "XYZ-2042",
+  "data": {
+    "sku": "XYZ-2042",
+    "name": "Wireless Earbuds Pro",
+    "price": 199.00,
+    "category": "electronics",
+    "tags": ["sale", "exclusive"],
+    "inStock": true,
+    "launchedAt": "2025-03-15"
+  }
+}

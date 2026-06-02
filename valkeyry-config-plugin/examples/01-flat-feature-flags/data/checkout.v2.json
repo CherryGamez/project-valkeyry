@@ -1,0 +1,10 @@
+{
+  "recordKey": "checkout.v2",
+  "data": {
+    "key": "checkout.v2",
+    "enabled": true,
+    "rolloutPercent": 75,
+    "audiences": ["beta", "ga"],
+    "owner": "payments"
+  }
+}

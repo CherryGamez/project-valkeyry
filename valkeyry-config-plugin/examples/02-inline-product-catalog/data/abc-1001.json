@@ -1,0 +1,12 @@
+{
+  "recordKey": "ABC-1001",
+  "data": {
+    "sku": "ABC-1001",
+    "name": "Classic Hoodie",
+    "price": 49.99,
+    "category": "apparel",
+    "tags": ["new", "eco-friendly"],
+    "inStock": true,
+    "launchedAt": "2024-09-01"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "valkeyry-config-preview-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Static-file + reverse-proxy front-end for the Emergent preview pod. Serves the real GUI from /app/valkeyry-config/.../static and forwards all backend paths to the FastAPI mock on :8001.",
+  "scripts": {
+    "start": "node serve.js"
+  }
+}

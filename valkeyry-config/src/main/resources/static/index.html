@@ -470,6 +470,10 @@
                         <pre id="endpoints-body" data-testid="endpoints-body"
                              class="json-box max-h-[60vh] overflow-auto scrollbar text-[12px]"
                              style="min-height: 200px;">(awaiting response)</pre>
+                        <details class="text-[12px] mt-1">
+                            <summary class="cursor-pointer text-ink-500 hover:text-ios-blue">Recent invocations (last 10)</summary>
+                            <div id="endpoints-history" data-testid="endpoints-history" class="grid gap-1 mt-1.5"></div>
+                        </details>
                     </aside>
                 </div>
             </div>
@@ -958,6 +962,7 @@ function renderEndpointsTab() {
             </div>
         </div>
     `).join('');
+    historyRenderAll();
 }
 
 function endpointRow(e, origin, rowId) {
@@ -998,6 +1003,7 @@ async function endpointsTry(method, path, noAuth) {
     setReqLine(method, path);
     setStatus('… in flight', 'bg-ink-100 text-ink-700');
     setBody('(awaiting response)');
+    let recorded = { status: 0, statusText: 'error', dtMs: 0, body: '(no response)' };
     try {
         const opts = { method };
         const res  = noAuth
@@ -1013,10 +1019,19 @@ async function endpointsTry(method, path, noAuth) {
                    : 'bg-[#FFE5E1] text-[#B8311F]';
         setStatus(`${res.status} ${res.statusText || ''} · ${dt} ms`, cls);
         setBody(pretty);
+        recorded = { status: res.status, statusText: res.statusText || '', dtMs: dt, body: pretty };
     } catch (e) {
         setStatus('Network error', 'bg-[#FFE5E1] text-[#B8311F]');
         setBody(String(e));
+        recorded = { status: 0, statusText: 'network-error', dtMs: 0, body: String(e) };
     }
+    historyPush('endpoints', {
+        ts: Date.now(),
+        method, url: path,
+        status: recorded.status, statusText: recorded.statusText,
+        dtMs: recorded.dtMs,
+        requestBody: null, responseBody: recorded.body
+    });
     function setReqLine(m, p) {
         const el = document.getElementById('endpoints-req-line');
         if (el) el.innerHTML = `<strong>${escapeHtml(m)}</strong> ${escapeHtml(p)}`;
@@ -1223,7 +1238,25 @@ async function selectTable(name) {
                 <summary class="cursor-pointer text-ink-500 hover:text-ios-blue">Response body</summary>
                 <pre id="elr-res-body" data-testid="elr-res-body" class="json-box mt-1.5 max-h-[280px] overflow-auto scrollbar text-[11px]"></pre>
             </details>
+            <details class="text-[12px]">
+                <summary class="cursor-pointer text-ink-500 hover:text-ios-blue">Recent invocations (last 10)</summary>
+                <div id="elr-history" data-testid="elr-history" class="grid gap-1 mt-1.5"></div>
+            </details>
         </div>
+
+        <!-- ============= Examples / Recipes panel ============= -->
+        <details class="mt-5 rounded-card border border-hairline bg-white p-4" data-testid="entry-recipes">
+            <summary class="cursor-pointer text-[13px] font-semibold tracking-tight hover:text-ios-blue">
+                Examples — different ways to add entries
+            </summary>
+            <div class="text-[12px] text-ink-500 mt-3 mb-2">Click any chip to load the payload into the active editor (matches the table's schema where possible).</div>
+            <div id="recipe-chips" data-testid="recipe-chips" class="flex flex-wrap gap-2"></div>
+            <div class="text-[11px] text-ink-500 mt-3">
+                Or POST from a terminal:
+                <button onclick="copyCurlForCurrent()" data-testid="recipe-copy-curl-btn"
+                        class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill ml-1">Copy as cURL</button>
+            </div>
+        </details>
       </div>
 
       <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
@@ -1243,6 +1276,9 @@ async function selectTable(name) {
     }
     loadEntries(name);
     window.__currentTable = name;
+    // Populate the schema-aware recipe chips and the persistent invocation history.
+    renderRecipes();
+    historyRenderAll();
 }
 
 function cssEscape(s) { return s.replace(/[^a-zA-Z0-9_-]/g, '\\$&'); }
@@ -2086,6 +2122,289 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch { schemaBuilderRender(); }
 });
 
+// =====================================================================
+// Invocation history (last 10) — persisted in localStorage so the lists
+// survive page reloads and apply equally to both the Entries page and
+// the Endpoints tab. Each item: { id, ts, scope, method, url, status,
+//                                  dtMs, requestBody, responseBody }
+// scope is 'entries' or 'endpoints' so the two lists don't bleed into
+// each other.
+// =====================================================================
+const HISTORY_KEY = 'vk.respHistory.v1';
+const HISTORY_MAX = 10;
+
+function historyPush(scope, item) {
+    const all = historyLoad();
+    all.unshift({ ...item, scope, id: Date.now() + ':' + Math.random().toString(36).slice(2,8) });
+    // Cap each scope independently
+    const trimmed = [];
+    const seen = { entries: 0, endpoints: 0 };
+    for (const it of all) {
+        seen[it.scope] = (seen[it.scope] || 0) + 1;
+        if (seen[it.scope] <= HISTORY_MAX) trimmed.push(it);
+    }
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+    historyRenderAll();
+}
+function historyLoad() {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+    catch { return []; }
+}
+function historyClear(scope) {
+    const remaining = historyLoad().filter(i => i.scope !== scope);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(remaining));
+    historyRenderAll();
+}
+function historyRenderAll() {
+    renderHistoryInto('elr-history', 'entries');
+    renderHistoryInto('endpoints-history', 'endpoints');
+}
+function renderHistoryInto(elId, scope) {
+    const host = document.getElementById(elId);
+    if (!host) return;
+    const items = historyLoad().filter(i => i.scope === scope);
+    if (items.length === 0) {
+        host.innerHTML = `<div class="text-[11px] text-ink-500 italic px-1 py-1" data-testid="${elId}-empty">No invocations recorded yet.</div>`;
+        return;
+    }
+    host.innerHTML = items.map(it => {
+        const ok    = it.status >= 200 && it.status < 300;
+        const cls4  = it.status >= 400 && it.status < 500;
+        const cls   = ok          ? 'bg-[#E0F8E9] text-[#1E7B41]'
+                     : cls4        ? 'bg-[#FFF1D9] text-[#9A6500]'
+                                   : 'bg-[#FFE5E1] text-[#B8311F]';
+        const ts = new Date(it.ts).toLocaleTimeString();
+        return `<button type="button" onclick="historyReplay('${it.id}', '${scope}')"
+                        data-testid="hist-item-${it.id.replace(/[:.]/g,'-')}"
+                        class="press text-left px-2 py-1.5 rounded border border-hairline bg-white hover:bg-ink-100/40 flex items-center gap-2">
+            <span class="font-mono text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded ${cls}">${it.status}</span>
+            <span class="font-mono text-[10px] text-ink-700 flex-shrink-0">${escapeHtml(it.method)}</span>
+            <span class="font-mono text-[10px] text-ink-500 truncate flex-1">${escapeHtml(it.url.replace(/^https?:\/\/[^/]+/, ''))}</span>
+            <span class="text-[10px] text-ink-500 flex-shrink-0">${escapeHtml(ts)} · ${it.dtMs}ms</span>
+        </button>`;
+    }).join('') + `<button type="button" onclick="historyClear('${scope}')" data-testid="hist-clear-${scope}"
+                           class="btn-ghost press text-[10px] px-2 py-1 border border-hairline rounded-pill mt-1 w-fit">Clear history</button>`;
+}
+function historyReplay(id, scope) {
+    const item = historyLoad().find(i => i.id === id);
+    if (!item) return;
+    if (scope === 'entries') {
+        // Synthesise a Response-like object so showLiveResponse can render it.
+        showLiveResponse(item.method, item.url, item.requestBody,
+                         { ok: item.status >= 200 && item.status < 300,
+                           status: item.status, statusText: item.statusText || '' },
+                         item.responseBody, item.dtMs);
+    } else {
+        const line = document.getElementById('endpoints-req-line');
+        const stat = document.getElementById('endpoints-status');
+        const body = document.getElementById('endpoints-body');
+        if (line) line.innerHTML = `<strong>${escapeHtml(item.method)}</strong> ${escapeHtml(item.url)}`;
+        if (stat) {
+            const ok = item.status >= 200 && item.status < 300;
+            const cls4 = item.status >= 400 && item.status < 500;
+            stat.className = 'text-[12px] inline-flex items-center px-2 py-0.5 rounded font-mono ' +
+                (ok ? 'bg-[#E0F8E9] text-[#1E7B41]' : cls4 ? 'bg-[#FFF1D9] text-[#9A6500]' : 'bg-[#FFE5E1] text-[#B8311F]');
+            stat.textContent = item.status + ' · ' + item.dtMs + ' ms (replay)';
+            stat.classList.remove('hidden');
+        }
+        if (body) body.textContent = typeof item.responseBody === 'string'
+            ? item.responseBody : JSON.stringify(item.responseBody, null, 2);
+    }
+}
+
+// =====================================================================
+// Recipes / Examples for adding entries
+// ---------------------------------------------------------------------
+// Each recipe is a sample payload the user can load into the current
+// editor (single → Raw JSON, multiple → Batch). Schema-aware: recipes
+// pick fields that exist in the active schema and skip unknowns. Falls
+// back to free-form examples when there is no schema in scope.
+// =====================================================================
+function buildRecipes(schema, tableName) {
+    const recipes = [];
+    const props = (schema && schema.properties) || {};
+    const has = (k) => k in props;
+
+    // ── Pick a "key" attribute for sample record-keys ──
+    const keyAttr = has('email') ? 'email' : has('key') ? 'key' : null;
+
+    // 1. Minimal — only required fields
+    recipes.push({
+        label: 'Minimal (required fields only)',
+        mode: 'json',
+        recordKey: keyAttr ? 'sample@example.com' : 'sample-1',
+        data: minimalSample(schema)
+    });
+
+    // 2. Full — every known field
+    recipes.push({
+        label: 'Full (all fields populated)',
+        mode: 'json',
+        recordKey: keyAttr ? 'full@example.com' : 'sample-full',
+        data: richSample(schema)
+    });
+
+    // 3. Boundary values — min/max integers, longest strings
+    if (Object.values(props).some(p => p && (p.type === 'integer' || p.type === 'number') && (p.minimum !== undefined || p.maximum !== undefined))) {
+        recipes.push({
+            label: 'Boundary values (min/max)',
+            mode: 'json',
+            recordKey: 'boundary-1',
+            data: boundarySample(schema)
+        });
+    }
+
+    // 4. Multi-choice picked — exercises every option in any array enum
+    const arrayEnum = Object.entries(props).find(([_, v]) =>
+        v && v.type === 'array' && v.items && Array.isArray(v.items.enum));
+    if (arrayEnum) {
+        recipes.push({
+            label: 'All multi-choice tags',
+            mode: 'json',
+            recordKey: 'tagged-1',
+            data: { ...richSample(schema), [arrayEnum[0]]: arrayEnum[1].items.enum }
+        });
+    }
+
+    // 5. Batch of 5 — pre-rolled list, exercises /entries:batch
+    recipes.push({
+        label: 'Batch of 5',
+        mode: 'batch',
+        data: Array.from({ length: 5 }, (_, i) => ({
+            recordKey: (keyAttr ? `user${i+1}@example.com` : `sample-${i+1}`),
+            data: { ...richSample(schema),
+                    ...(has('email') ? { email: `user${i+1}@example.com` } : {}),
+                    ...(has('key')   ? { key:   `flag.${i+1}` } : {}) }
+        }))
+    });
+
+    // 6. Schema-violation demo — wrong type, useful to see the 422 panel
+    if (has('email')) {
+        recipes.push({
+            label: 'Invalid email (422 demo)',
+            mode: 'json',
+            recordKey: 'invalid-1',
+            data: { ...richSample(schema), email: 'not-an-email' }
+        });
+    }
+    if (has('enabled')) {
+        recipes.push({
+            label: 'Wrong type (422 demo)',
+            mode: 'json',
+            recordKey: 'invalid-bool',
+            data: { ...richSample(schema), enabled: 'oops-a-string' }
+        });
+    }
+
+    return recipes;
+}
+
+function minimalSample(schema) {
+    if (!schema || schema.type !== 'object') return {};
+    const required = new Set(schema.required || []);
+    const out = {};
+    for (const [k, p] of Object.entries(schema.properties || {})) {
+        if (!required.has(k)) continue;
+        out[k] = exampleFor(p);
+    }
+    return out;
+}
+function richSample(schema) {
+    if (!schema || schema.type !== 'object') return {};
+    const out = {};
+    for (const [k, p] of Object.entries(schema.properties || {})) {
+        out[k] = exampleFor(p, k);
+    }
+    return out;
+}
+function boundarySample(schema) {
+    const base = richSample(schema);
+    for (const [k, p] of Object.entries(schema.properties || {})) {
+        if (p.type === 'integer' || p.type === 'number') {
+            if (p.minimum !== undefined) base[k] = p.minimum;
+            else if (p.maximum !== undefined) base[k] = p.maximum;
+        }
+    }
+    return base;
+}
+function exampleFor(p, name) {
+    if (!p) return null;
+    if (p.default !== undefined) return p.default;
+    if (Array.isArray(p.enum) && p.enum.length) return p.enum[0];
+    switch (p.type) {
+        case 'boolean': return true;
+        case 'integer': return p.minimum ?? 0;
+        case 'number':  return p.minimum ?? 0;
+        case 'array':
+            if (p.items && Array.isArray(p.items.enum)) return [p.items.enum[0]];
+            return [];
+        case 'object':  return {};
+        case 'string':
+        default:
+            if (p.format === 'email')     return (name || 'sample') + '@example.com';
+            if (p.format === 'uri')       return 'https://example.com/' + (name || 'r');
+            if (p.format === 'date')      return new Date().toISOString().slice(0,10);
+            if (p.format === 'date-time') return new Date().toISOString();
+            if (p.pattern === '^[a-z0-9_.-]+$') return 'sample.key';
+            return 'sample-' + (name || 'value');
+    }
+}
+
+// Render the recipe chips inside #recipe-chips after a table is opened.
+function renderRecipes() {
+    const host = document.getElementById('recipe-chips');
+    if (!host) return;
+    const recipes = buildRecipes(window.__currentSchema, window.__currentTable);
+    window.__recipes = recipes;
+    host.innerHTML = recipes.map((r, i) => `
+        <button type="button" onclick="loadRecipe(${i})" data-testid="recipe-${i}"
+                class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">
+            ${escapeHtml(r.label)} <span class="text-ink-500 ml-1">· ${r.mode}</span>
+        </button>`).join('');
+}
+
+function loadRecipe(idx) {
+    const r = (window.__recipes || [])[idx];
+    if (!r) return;
+    if (r.mode === 'batch') {
+        switchEntryMode('batch');
+        document.getElementById('entry-batch').value = JSON.stringify(r.data, null, 2);
+        toast('Loaded recipe: ' + r.label);
+    } else {
+        switchEntryMode('json');
+        if (r.recordKey) document.getElementById('entry-key').value = r.recordKey;
+        document.getElementById('entry-data').value = JSON.stringify(r.data, null, 2);
+        toast('Loaded recipe: ' + r.label);
+    }
+}
+
+// Copy a ready-to-paste cURL for the current editor state.
+function copyCurlForCurrent() {
+    const name = window.__currentTable;
+    if (!name) { toast('Open a table first', true); return; }
+    const conn = getConn();
+    const origin = window.location.origin;
+    const mode = window.__entryMode || 'form';
+    let url, body;
+    if (mode === 'batch') {
+        url  = origin + apiBase() + '/tables/' + encodeURIComponent(name) + '/entries:batch';
+        body = document.getElementById('entry-batch').value;
+    } else {
+        url  = origin + apiBase() + '/tables/' + encodeURIComponent(name) + '/entries';
+        const rk = document.getElementById('entry-key').value.trim() || 'sample-1';
+        let data; try { data = JSON.parse(document.getElementById('entry-data').value || '{}'); } catch { data = {}; }
+        body = JSON.stringify({ recordKey: rk, data });
+    }
+    const authHeader = (conn.mode === 'bearer')
+        ? `-H "Authorization: Bearer ${conn.token || '<token>'}"`
+        : `-H "X-API-Key: ${conn.token || '<api-key>'}"`;
+    const escBody = body.replace(/'/g, `'\\''`);
+    const curl = `curl -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  ${authHeader} \\\n  -d '${escBody}'`;
+    navigator.clipboard.writeText(curl)
+        .then(() => toast('cURL copied to clipboard'))
+        .catch(() => { prompt('Copy this cURL:', curl); });
+}
+
 // ============== Ingest / update an entry ==============
 async function ingestEntry(name) {
     // Batch mode? Delegate.
@@ -2212,6 +2531,13 @@ function showLiveResponse(method, url, requestBody, response, responseBody, dtMs
     resB.textContent = (responseBody === undefined || responseBody === null || responseBody === '')
         ? '(empty body)'
         : (typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2));
+
+    // Push into the persistent history for replay later.
+    historyPush('entries', {
+        ts: Date.now(),
+        method, url, status: response.status, statusText: response.statusText || '',
+        dtMs, requestBody, responseBody
+    });
 
     // Scroll the panel into view so the user sees the JSON without hunting for it.
     setTimeout(() => host.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);

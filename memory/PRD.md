@@ -246,3 +246,98 @@ server returned.
 - P2 — In the Endpoints tab, support **path-placeholder substitution**
   (e.g. ask the user for `{name}`) so even templated GETs become tryable.
 - P2 — Persist a request history (last 10) in the live-response pane.
+
+### 2026-02-14 — Examples, history, Swagger annotations, live preview
+**Problem**: users asked for (1) richer Swagger via `@Operation` /
+`@ApiResponses` annotations, (2) persistent last-10 invocation history, (3)
+worked examples for adding entries, (4) end-to-end plugin examples + tests,
+and (5) a live preview URL they can drive in-browser.
+
+**What shipped**
+1. **Live preview stack** at `https://<preview-host>/`.
+   - `/app/backend/server.py` — FastAPI mock that mirrors every Java DTO
+     (VirtualTableEntry, AuditEntry, WebhookSubscription, problem+json
+     errors), seeds two demo tables (`users`, `feature_flags`) with
+     fixtures, mounts a Swagger-UI HTML page served from `jsDelivr` CDN,
+     aliases `/v3/api-docs` to FastAPI's OpenAPI, and validates inputs
+     (boolean type, regex pattern, format=email/uri/date/date-time, enum,
+     min/max) so 422s look real.
+   - `/app/frontend/serve.js` — minimal Node http server (zero deps) that
+     serves the production HTML from
+     `valkeyry-config/src/main/resources/static/` on port 3000 and
+     reverse-proxies `/api`, `/v3`, `/swagger-ui*`, `/webjars`, `/actuator`
+     to the FastAPI backend on 8001.
+   - Wired through supervisor so both auto-restart and survive reloads.
+2. **Per-controller Swagger annotations** on the four Java REST controllers
+   (`VirtualTableController`, `AuditController`, `AuditRollbackController`,
+   `WebhookSubscriptionController`). Each operation has `@Tag`,
+   `@Operation(summary, description)`, and a `@ApiResponses` list documenting
+   200/201/204/400/401/403/404/409/422.
+3. **Invocation history (last 10) in the GUI** — `historyPush` / `historyLoad`
+   helpers store every Live-API-response invocation (entries page) and every
+   Endpoints-tab `Try` invocation in `localStorage` under `vk.respHistory.v1`,
+   scoped separately. Clicking a history row replays the request/response
+   pair into the live pane without re-hitting the network. Both panels show
+   the last 10; older invocations are FIFO-dropped.
+4. **Recipes / Examples panel** below the entry editor — schema-aware:
+   `Minimal (required only)`, `Full (all fields populated)`,
+   `Boundary values (min/max)`, `All multi-choice tags`, `Batch of 5`,
+   `Invalid email (422 demo)`, `Wrong type (422 demo)`. Click any chip and
+   the active editor (Form / Raw JSON / Batch) is auto-populated and the
+   submit-button label flips accordingly. A `Copy as cURL` button serialises
+   the current editor state to a ready-to-paste curl command (with the
+   active API-key / bearer header injected).
+5. **Plugin worked examples** under
+   `valkeyry-config-plugin/examples/` with READMEs and runnable manifests:
+   - `01-flat-feature-flags/` — classic `schema:` file + per-record JSONs;
+   - `02-inline-product-catalog/` — every UI widget expressed in YAML;
+   - `03-multi-table/` — three tables in one push, mixed styles;
+   - `04-env-driven/` — `${VAR:default}` env-resolved CI shape.
+6. **End-to-end plugin JUnit test**
+   `plugin-core/src/test/java/io/valkeyry/plugin/core/PluginEngineE2ETest.java`
+   spins up a `com.sun.net.httpserver.HttpServer` mock and exercises the
+   full `PluginEngine.run(…)` path: file-based schemas, inline schemas
+   (asserting every widget shape survives the YAML→JsonNode round-trip),
+   multi-table manifests, and the idempotency-skip path.
+
+**Testing performed**
+- `node --check` PASS on the rewritten JS.
+- `python3 -c "import server"` PASS on the new FastAPI mock (no import errors).
+- Curl smoke against the preview URL:
+  - `GET  /                                                → 200`
+  - `GET  /swagger-ui.html                                 → 200` (Swagger UI rendered 18 operations)
+  - `GET  /v3/api-docs                                     → 200` (14 paths in OpenAPI doc)
+  - `GET  /api/v1/tenants/demo-tenant/tables               → 200` (returns seeded `users` + `feature_flags`)
+  - `POST /api/v1/tenants/demo-tenant/tables/users/entries`
+    with `{"recordKey":"bad","data":{"email":"not-an-email"}}` → `422` with proper `urn:valkeyry:error:schema-violation` problem+json
+- Playwright smoke against the live preview (no mocks):
+  - "users" table opens with the seeded schema → form renders dropdown / checkbox / multi-choice ✅
+  - Recipe chip "Full" → POST → 201 with full server JSON in live panel ✅
+  - Recipe chip "Batch of 5" → submit label flipped to "Save batch" → 201 with 5 records ✅
+  - Recipe chip "Invalid email" → 422 with inline schema-violation banner + full problem+json in panel ✅
+  - History list shows all 3 invocations (clickable replay) ✅
+  - Endpoints tab → Try on `/actuator/health` → 200 in right-hand pane, history accumulates ✅
+  - Swagger UI at `/swagger-ui.html` → 18 operations rendered ✅
+- **JVM unavailable in this pod** — the new annotations and JUnit test compile against the Java standard library + springdoc-openapi (declared in pom.xml) but have not been executed here. Please run `mvn -pl valkeyry-config -am verify` and `mvn -pl valkeyry-config-plugin/plugin-core test` on a JDK-21 host.
+
+**Files touched (this iteration)**
+- `valkeyry-config/pom.xml` *(already had springdoc; no further change)*
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/VirtualTableController.java`
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/AuditController.java`
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/AuditRollbackController.java`
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/WebhookSubscriptionController.java`
+- `valkeyry-config/src/main/resources/static/index.html` (+ history list, recipes panel, copy-curl)
+- `valkeyry-config-plugin/examples/**` (4 example projects, brand new)
+- `valkeyry-config-plugin/plugin-core/src/test/java/io/valkeyry/plugin/core/PluginEngineE2ETest.java` (new)
+- `backend/server.py` + `backend/requirements.txt` + `backend/.env` (preview mock)
+- `frontend/serve.js` + `frontend/package.json` + `frontend/.env` (static + proxy)
+
+**Next / Backlog**
+- P1 — Run `mvn -pl valkeyry-config-plugin/plugin-core test` on JDK-21 to
+  confirm the four-test E2E suite is green (the only piece I couldn't
+  execute in-pod due to absence of a JVM).
+- P2 — Bundle the Swagger-UI assets as a Spring resource handler so the
+  preview no longer depends on jsDelivr at runtime.
+- P2 — Extend the Visual Builder to read existing nested objects / `oneOf`
+  variants (still falls through to Raw JSON today).
+- P2 — Add a "Replay this invocation as a curl" button on each history row.

@@ -1,0 +1,10 @@
+endpoint: ${VALKEYRY_ENDPOINT:http://localhost:8081}
+tenant:   ${VALKEYRY_TENANT:demo-tenant}
+auth:
+  type:   api-key
+  apiKey: ${VALKEYRY_API_KEY:plugin-test-key}
+
+tables:
+  - name:    feature_flags
+    schema:  schemas/feature_flags.schema.json
+    entries: data/*.json

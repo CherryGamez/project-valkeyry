@@ -1,0 +1,10 @@
+{
+  "recordKey": "export.csv",
+  "data": {
+    "key": "export.csv",
+    "enabled": false,
+    "rolloutPercent": 0,
+    "audiences": ["internal"],
+    "owner": "growth"
+  }
+}

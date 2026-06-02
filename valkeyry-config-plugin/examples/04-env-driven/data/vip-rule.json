@@ -1,0 +1,1 @@
+{"recordKey":"vip-rule","data":{"pattern":"customer.tier=vip","destination":"primary","priority":10,"active":true}}

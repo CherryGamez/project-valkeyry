@@ -1,0 +1,35 @@
+endpoint: ${VALKEYRY_ENDPOINT:http://localhost:8081}
+tenant:   ${VALKEYRY_TENANT:demo-tenant}
+auth:
+  type:   api-key
+  apiKey: ${VALKEYRY_API_KEY:plugin-test-key}
+
+tables:
+  # ── 1. customers ── file-based schema, 2 records
+  - name:    customers
+    schema:  schemas/customers.schema.json
+    entries: data/customers/*.json
+
+  # ── 2. feature_flags ── inline schema, 2 records
+  - name: feature_flags
+    schemaInline:
+      type: object
+      required: [key, enabled]
+      properties:
+        key:     { type: string, pattern: "^[a-z0-9_.-]+$" }
+        enabled: { type: boolean, default: false }
+        owner:   { type: string, enum: [platform, payments, growth, security] }
+      additionalProperties: false
+    entries: data/flags/*.json
+
+  # ── 3. webhooks_registry ── inline schema, 1 record (no widgets)
+  - name: webhooks_registry
+    schemaInline:
+      type: object
+      required: [name, url]
+      properties:
+        name:    { type: string }
+        url:     { type: string, format: uri }
+        enabled: { type: boolean, default: true }
+      additionalProperties: false
+    entries: data/webhooks/*.json
