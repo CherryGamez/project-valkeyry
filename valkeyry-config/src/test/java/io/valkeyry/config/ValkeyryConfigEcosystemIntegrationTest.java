@@ -6,13 +6,7 @@ import io.valkeyry.plugin.core.PluginEngine;
 import io.valkeyry.plugin.core.PluginLog;
 import io.valkeyry.plugin.core.PluginResult;
 import no.nav.security.mock.oauth2.MockOAuth2Server;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.MethodOrderer;
-import org.junit.jupiter.api.Order;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -64,7 +58,7 @@ class ValkeyryConfigEcosystemIntegrationTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("valkeyry_config")
-            .withUsername("postgres")
+            .withUsername("valkeyry")
             .withPassword("valkeyry");
 
     private static MockOAuth2Server OAUTH;

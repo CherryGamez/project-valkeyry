@@ -9,7 +9,6 @@ import io.valkeyry.config.repo.AuditWebhookSubscriptionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -38,7 +37,6 @@ import java.util.Map;
  * exponential backoff on 5xx/IO; 4xx fails fast; webhook failure never undoes the audit insert.</p>
  */
 @Component
-@Configuration
 @EnableConfigurationProperties(AuditWebhookProperties.class)
 public class AuditWebhookPublisher {
 
@@ -52,6 +50,13 @@ public class AuditWebhookPublisher {
     private final AuditWebhookSubscriptionRepository subscriptions;
     private final ObjectMapper mapper;
     private final WebClient webClient;
+
+    public AuditWebhookPublisher() {
+        this.props = null;
+        this.subscriptions = null;
+        this.mapper = null;
+        this.webClient = null;
+    }
 
     public AuditWebhookPublisher(AuditWebhookProperties props,
                                  AuditWebhookSubscriptionRepository subscriptions,
