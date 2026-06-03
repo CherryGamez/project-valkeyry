@@ -304,7 +304,9 @@
             <a href="/tools.html" data-testid="nav-tools-link"
                class="btn-ghost press text-[13px] px-3 py-1.5">Tools</a>
             <span id="who-label" data-testid="who-label" class="text-[11px] text-ink-500 font-mono"></span>
-            <button id="logout-btn" data-testid="logout-btn" class="btn-ghost press text-[13px] px-3 py-1.5">Logout</button>
+            <button id="logout-btn" data-testid="logout-btn" type="button"
+                    onclick="if(window.vk) vk.logout();"
+                    class="btn-ghost press text-[13px] px-3 py-1.5 relative z-30">Logout</button>
         </div>
     </div>
 
@@ -3310,15 +3312,21 @@ function bootApp() {
     const logoutBtn = document.getElementById('logout-btn');
     if (whoLabel)  whoLabel.textContent  = vk.username() + ' · ' + vk.role();
     if (adminLink && vk.isAdmin()) adminLink.classList.remove('hidden');
-    if (logoutBtn) logoutBtn.addEventListener('click', vk.logout);
+    // logout-btn uses inline onclick so it survives even when the tenant-connect modal
+    // is open above the top-bar; the listener below is a defensive fallback.
+    if (logoutBtn) logoutBtn.addEventListener('click', () => vk.logout());
 
     const c = getConn();
     document.getElementById('auth-tenant').value = c.tenantId;
     document.getElementById('auth-mode').value   = c.mode;
     document.getElementById('auth-token').value  = c.token;
     syncConnStatus();
-    if (hasConn()) refreshSidebar();
-    else document.getElementById('auth-modal').showModal();
+    if (hasConn()) {
+        refreshSidebar();
+    }
+    // No tenant credentials yet — leave the Connect button visible in the topbar instead
+    // of auto-popping the modal, which would trap the logout/admin/tools controls under a
+    // <dialog> backdrop and break those nav buttons.
 }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootApp, { once: true });

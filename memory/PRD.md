@@ -569,3 +569,97 @@ no single REST endpoint that mirrored the UI's WHERE behaviour.
 3. **Cursor pagination** — pager strip below entries: `page N · rows X–Y` status, `Rows/page` selector (25/50/100/200), `‹ Prev` and `Next ›`. Cursor lives in `window.__pageOffset` / `window.__pageSize`; resets on table switch. Mock backend's `list_entries` now accepts `offset: int`. Verified: page 1 → 2 rows, Next → page 2 → 1 row, status `page 2 · rows 3–4`.
 
 **Files**: `valkeyry-config/src/main/resources/static/index.html`, `backend/server.py`.
+
+
+---
+
+## 2026-02-15 — Phase 1+2+3: Hybrid Auth, Admin Panel, Tools Converter
+
+### Goal
+Add a Camunda-Identity style login + admin experience on top of the headless schema registry:
+1. Login page with **WebSSO** *and* **username/password** options.
+2. Backend mints HS256 JWTs; verifies external OIDC when SSO is enabled.
+3. Admin panel for Tenant + User CRUD.
+4. Role-based gating: `reader` (default), `writer`, `admin`.
+5. Local **admin bypass** via env vars so a fresh DB still admits the operator.
+6. Independent **SSO** and **LDAP** toggles.
+7. **Tools** tab for converting XLSX/CSV/DMN → JSON (ready-to-ingest shape).
+8. Fix the persistent `InvalidBearerTokenException: Missing dot delimiter(s)` error.
+
+### What shipped — Java (`/app/valkeyry-config/`)
+- `db/migration/V4__admin_users_and_tenants.sql` — `tenant`, `app_user`, `app_user_tenant`.
+- `domain/admin/{AdminTenant, AppUser, AppUserTenant}` + matching R2DBC repositories.
+- `config/AuthProperties.java` — env-var driven toggles (`VALKEYRY_SSO_ENABLED`,
+  `VALKEYRY_LDAP_ENABLED`, `VALKEYRY_ADMIN_USERNAME`, `VALKEYRY_ADMIN_PASSWORD`,
+  `VALKEYRY_JWT_SECRET`, `VALKEYRY_JWT_ISSUER`, `VALKEYRY_JWT_TTL_SECONDS`).
+- `config/AuthBootstrapConfig.java` — `PasswordEncoder` (BCrypt) bean,
+  `ReactiveJwtDecoder` bean (composite local HS256 + optional external OIDC),
+  one-shot `seedBuiltinAdmin` on `ApplicationReadyEvent`.
+- `security/local/LocalJwtService.java` — HS256 mint with `valkeyry.role`, `valkeyry.tenants`,
+  `valkeyry.source` claims.
+- `security/local/CompositeReactiveJwtDecoder.java` — routes local vs external tokens by `iss`.
+- `security/local/SafeBearerTokenAuthenticationConverter.java` — **fixes the
+  "Missing dot delimiter(s)" bug** by rejecting non-3-segment bearers *before* the OIDC pipeline.
+- `security/oidc/JwtTenantAuthoritiesConverter.java` — extended to emit
+  `SCOPE_admin` + implicit `ROLE_VALKEYRY_WRITER` for admin role.
+- `security/SecurityConfig.java` — rewrites the chain with the new bearer converter,
+  `@EnableReactiveMethodSecurity`, admin-path gate, conditional LDAP filter.
+- `api/AuthController.java` — `GET /config`, `POST /login`, `GET /me`, `POST /logout`.
+- `api/AdminController.java` — `*/api/v1/admin/tenants`, `*/api/v1/admin/users`; class-level
+  `@PreAuthorize("hasAuthority('SCOPE_admin')")`.
+- `api/ToolsController.java` — `POST /api/v1/tools/convert/{xlsx|csv|dmn}` using
+  Apache POI, OpenCSV, and Camunda DMN model.
+- `pom.xml` — added `poi-ooxml 5.3.0`, `opencsv 5.9`, `camunda-engine-dmn 7.21.0`.
+- `application.yml` — `spring.security.oauth2.resourceserver.jwt.issuer-uri` is now blank
+  by default so autoconfig doesn't probe a missing OIDC issuer at startup.
+- Unit tests:
+  `SafeBearerTokenAuthenticationConverterTest`, `LocalJwtServiceTest`, `ToolsControllerTest`.
+
+### What shipped — Static UI (HTMX)
+- `static/login.html` — WebSSO button (hidden when `ssoEnabled=false`) + username/password form.
+- `static/admin.html` — Tenant + User CRUD with `<dialog>` modals, role/source badges.
+- `static/tools.html` — Drag/drop dropzone, kind selector, JSON viewer, copy/download buttons.
+- `static/assets/auth.js` — `vk.*` helpers (`getAuth/setAuth/clearAuth/requireAuth/logout/fetch`)
+  + `htmx:configRequest` hook injecting `Authorization: Bearer <jwt>`
+  + `htmx:responseError` 401-redirect to `/login.html`.
+- `static/index.html` — top-bar gains `Admin` (admin-only), `Tools`, `Logout` buttons;
+  `bootApp()` enforces `vk.requireAuth()`; no longer auto-opens the tenant-connect modal
+  (it trapped the topbar under the `<dialog>` backdrop and broke logout).
+
+### What shipped — FastAPI mock (`/app/backend/server.py`)
+For the Emergent preview pod (no JVM), the Python mock now mirrors:
+- `/login.html`, `/admin.html`, `/tools.html`, `/assets/{name}` static routes.
+- `/api/v1/auth/{config,login,me,logout}` with a 3-segment compact-JWS shaped fake token.
+- `/api/v1/admin/{tenants,users}` full CRUD (in-memory).
+- `/api/v1/tools/convert/csv` (csv module), `/dmn` (xml.etree). `xlsx` returns 501.
+
+### Testing (iteration_1.json)
+- **Backend: 14/14 pytest cases passed** (auth flows, admin CRUD, role gating, tools converters).
+- **Frontend: ~90%** initially. One UI bug found — the logout-btn on `/` was blocked by the
+  auto-opening tenant-connect `<dialog>` backdrop. **Fixed** by not auto-opening that modal
+  and adding inline `onclick` on the logout button. Verified end-to-end via Playwright:
+  `login → admin → / → click logout → /login.html`.
+
+### Credentials
+- Built-in admin: `admin / admin` (env-overrideable). See `/app/memory/test_credentials.md`.
+
+### Toggles (env vars)
+| Var                          | Default | Effect                                       |
+|------------------------------|---------|----------------------------------------------|
+| `VALKEYRY_SSO_ENABLED`       | `false` | Mount the WebSSO button + external decoder  |
+| `VALKEYRY_LDAP_ENABLED`      | `false` | Mount the LDAP Basic filter                 |
+| `VALKEYRY_ADMIN_USERNAME`    | `admin` | Local admin username                        |
+| `VALKEYRY_ADMIN_PASSWORD`    | `admin` | Local admin password                        |
+| `VALKEYRY_JWT_SECRET`        | dev key | HS256 secret (≥32 bytes)                    |
+| `VALKEYRY_OIDC_ISSUER`       | empty   | Required when SSO enabled                   |
+
+### Setup-guide updates
+- `valkeyry-config/WINDOWS_TEST_GUIDE.md` — new §3.4 covering admin/tools/login flow + bug fix.
+- `valkeyry-config/MAC_TEST_GUIDE.md` — same §3.4.
+
+### Files of reference (next session)
+- `valkeyry-config/src/main/java/io/valkeyry/config/api/{Auth,Admin,Tools}Controller.java`
+- `valkeyry-config/src/main/java/io/valkeyry/config/security/SecurityConfig.java`
+- `valkeyry-config/src/main/java/io/valkeyry/config/security/local/{LocalJwtService,SafeBearerTokenAuthenticationConverter,CompositeReactiveJwtDecoder}.java`
+- `valkeyry-config/src/main/resources/static/{login,admin,tools,index}.html`, `assets/auth.js`
+- `backend/server.py` (mock parity)
