@@ -586,7 +586,10 @@ def query_advanced(tenant_id: str, body: Dict[str, Any]):
                 cd, lo, hi = parse_dt(cell), parse_dt(v), parse_dt(v2)
                 if cd is None or lo is None or hi is None: return False
                 return lo <= cd <= hi
-        except Exception:
+        except Exception as _exc:
+            # Don't let one malformed cell zero-out the entire result set; just skip the row
+            # but surface the cause in the server log so misbehaving regex/dates are diagnosable.
+            print(f"[query2] eval_cond skipped row (field={field!r}, op={op!r}): {_exc}", flush=True)
             return False
         raise HTTPException(status_code=400, detail=f"Unsupported op: {op}")
 

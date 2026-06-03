@@ -660,6 +660,43 @@ For the Emergent preview pod (no JVM), the Python mock now mirrors:
   with a pre-built 12 KB minified `assets/tailwind.css` (Tailwind 3.4.17 CLI).
 - Source kept committed at `assets/tailwind.config.cjs` + `assets/tailwind.src.css`;
   rebuild instructions in `assets/README.md`. No Node toolchain required for the
+
+
+---
+
+## 2026-02-15 — Multi-condition query builder + scrollable expand-in-place results
+
+### Goal
+1. Records list lives in a scrollable frame (vertical scrollbar); clicking a row expands inline.
+2. WHERE clause supports multiple PL/SQL-style conditions joined by per-row AND/OR connectors.
+3. Full operator set: `equals`, `notEquals`, `contains`, `notContains`, `startsWith`, `endsWith`, `regex`, `in`, `notIn`, `gt`, `gte`, `lt`, `lte`, `between`, `isNull`, `isNotNull`, `before`, `after`, `onDate`, `betweenDates`.
+
+### Backend (Java)
+- `service/query/PredicateCompiler.java` — turns a list of `{field, op, value, value2?, connector}` rows into a parameterised Postgres WHERE fragment over the `data` JSONB column. Injection-safe (named parameters only, field-name regex validation).
+- `service/VirtualTableService.searchAdvanced()` — runs the compiled SQL via R2DBC `DatabaseClient` against `virtual_table_entry` with the tenant/table/is_latest guard.
+- `api/UnifiedQueryController.queryAdvanced()` → `POST /api/v1/tenants/{tenantId}/query2` (new endpoint; legacy `/query` preserved).
+- 19 unit tests in `PredicateCompilerTest` covering every operator + injection guard + invalid-connector / illegal-field-name / unsupported-op error paths.
+
+### Backend (Python mock)
+- `query_advanced()` in `/app/backend/server.py` mirrors all 19 ops including CSV-vs-array `in` value forms and per-row AND/OR connectors.
+
+### Frontend (HTMX `index.html`)
+- New dynamic condition-row builder (`addQueryCondition`, `updateQueryRowInputs`, `readQueryConditions`).
+- `QUERY_OPS` array drives UI rendering: `pair:true` for between/betweenDates → second input; `dateType:true` → datetime-local picker; `needsValue:false` → input hidden with "no value needed" hint.
+- Connector dropdown invisible on row 1, AND/OR on rows 2+.
+- Entries grid now wrapped in `data-testid="entries-frame"` (`.ios-card` with `overflow-y-auto`, `max-height: 65vh`).
+- Inline expand-on-click via `toggleEntryRow()` — one row open at a time, with chevron rotation, ring-2 styling, and a Copy-JSON button inside the expanded body.
+- `copyQueryAsCurl()` emits a curl POSTing to `/query2` with the full conditions array.
+- "Reset" clears all rows and resets `__qbRowSeq` so test IDs are deterministic.
+
+### Testing
+- **Java `mvn test`: 52/52** (was 33 → +19 new `PredicateCompilerTest`).
+- **Iteration 2 testing agent**: Backend 14/14, Frontend 100% in-scope flows. Verified: 2-condition AND, OR connector, isNotNull, startsWith (case-insensitive), in (array + CSV), reset behavior, expand-collapse, only-one-expanded-at-a-time, Copy as cURL, backward-compat /query.
+- Test report: `/app/test_reports/iteration_2.json`.
+
+### Files changed
+- New: `service/query/PredicateCompiler.java`, `service/query/PredicateCompilerTest.java`.
+- Updated: `api/UnifiedQueryController.java`, `service/VirtualTableService.java`, `/app/backend/server.py`, `/app/valkeyry-config/src/main/resources/static/index.html`.
   Maven build — the CSS is shipped as a static resource.
 
 ### Credentials
