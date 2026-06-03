@@ -509,6 +509,103 @@ def query_unified(tenant_id: str, body: Dict[str, Any]):
     return [project(r, fields) for r in rows]
 
 
+@app.post("/api/v1/tenants/{tenant_id}/query2")
+def query_advanced(tenant_id: str, body: Dict[str, Any]):
+    """Multi-condition PL/SQL-style query — mirrors the Java UnifiedQueryController#queryAdvanced.
+
+    Body: ``{ table, conditions: [{field, op, value, value2?, connector?}], fields?, limit?, offset? }``.
+
+    Supported ops: equals, notEquals, contains, notContains, startsWith, endsWith, regex, in,
+    notIn, gt, gte, lt, lte, between, isNull, isNotNull, before, after, onDate, betweenDates.
+    """
+    import re as _re
+    from datetime import datetime as _dt
+    table = body.get("table")
+    if not table:
+        raise HTTPException(status_code=400, detail="'table' is required")
+    conditions = body.get("conditions") or []
+    fields = body.get("fields")
+    limit  = body.get("limit") or 1000
+    offset = body.get("offset") or 0
+
+    def get_cell(row, field):
+        if not field: return None
+        if field == "recordKey": return row.get("recordKey")
+        path = field[5:] if field.startswith("data.") else field
+        cur = row.get("data") or {}
+        for p in path.split('.'):
+            if not isinstance(cur, dict): return None
+            cur = cur.get(p)
+        return cur
+
+    def parse_dt(v):
+        if v is None: return None
+        if isinstance(v, (int, float)): return _dt.fromtimestamp(v)
+        try: return _dt.fromisoformat(str(v).replace('Z', '+00:00'))
+        except Exception: return None
+
+    def eval_cond(row, c):
+        field = c.get("field", "")
+        op = c.get("op")
+        v  = c.get("value")
+        v2 = c.get("value2")
+        cell = get_cell(row, field)
+        # Empty field → TRUE (matches Java behavior)
+        if not field: return True
+        try:
+            if op == "equals":     return cell == v
+            if op == "notEquals":  return cell != v
+            if op == "contains":   return cell is not None and str(v).lower() in str(cell).lower()
+            if op == "notContains":return cell is None or str(v).lower() not in str(cell).lower()
+            if op == "startsWith": return cell is not None and str(cell).lower().startswith(str(v).lower())
+            if op == "endsWith":   return cell is not None and str(cell).lower().endswith(str(v).lower())
+            if op == "regex":      return cell is not None and bool(_re.search(str(v), str(cell), _re.IGNORECASE))
+            if op in ("in","notIn"):
+                items = v if isinstance(v, list) else [s.strip() for s in str(v).split(',') if s.strip()]
+                hit = str(cell) in [str(x) for x in items]
+                return hit if op == "in" else not hit
+            if op == "isNull":     return cell is None
+            if op == "isNotNull":  return cell is not None
+            if op in ("gt","gte","lt","lte"):
+                if cell is None or v is None: return False
+                try: a, b = float(cell), float(v)
+                except (TypeError, ValueError): return False
+                return {"gt":a>b,"gte":a>=b,"lt":a<b,"lte":a<=b}[op]
+            if op == "between":
+                if cell is None or v is None or v2 is None: return False
+                try: x, lo, hi = float(cell), float(v), float(v2)
+                except (TypeError, ValueError): return False
+                return lo <= x <= hi
+            if op in ("before","after","onDate"):
+                cd, vd = parse_dt(cell), parse_dt(v)
+                if cd is None or vd is None: return False
+                if op == "before": return cd < vd
+                if op == "after":  return cd > vd
+                return cd.date() == vd.date()
+            if op == "betweenDates":
+                cd, lo, hi = parse_dt(cell), parse_dt(v), parse_dt(v2)
+                if cd is None or lo is None or hi is None: return False
+                return lo <= cd <= hi
+        except Exception:
+            return False
+        raise HTTPException(status_code=400, detail=f"Unsupported op: {op}")
+
+    def matches(row):
+        if not conditions: return True
+        acc = eval_cond(row, conditions[0])
+        for c in conditions[1:]:
+            conn = (c.get("connector") or "AND").upper()
+            cur = eval_cond(row, c)
+            if conn == "OR":  acc = acc or cur
+            else:             acc = acc and cur
+        return acc
+
+    rows = [r for r in _collect_entries(tenant_id, table, limit + offset) if matches(r)]
+    rows = rows[offset:offset + limit]
+    return [project(r, fields) for r in rows]
+
+
+
 @app.post("/api/v1/tenants/{tenant_id}/tables/{name}/search")
 def search(tenant_id: str, name: str, body: Dict[str, Any],
            fields: Optional[str] = Query(None)):

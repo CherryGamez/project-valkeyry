@@ -690,26 +690,28 @@
 {{#hasRows}}
 <ul class="grid gap-2" data-testid="entries-list">
 {{#rows}}
-<li class="ios-card p-4 grid gap-2 lift cursor-pointer hover:shadow-md transition-shadow" data-testid="entry-row-{{recordKey}}"
+<li class="ios-card p-3 grid gap-1 lift cursor-pointer hover:shadow-md transition-shadow"
+    data-testid="entry-row-{{recordKey}}"
     data-rk="{{recordKey}}" data-payload="{{dataJson}}"
     data-meta="v{{version}} · {{createdAt}} · {{createdBy}}"
-    onclick="if (event.target.tagName !== 'BUTTON' && event.target.tagName !== 'A' && !event.target.closest('details,button,a')) selectEntryRow(this)">
+    onclick="toggleEntryRow(event, this)">
     <div class="flex items-center gap-3 flex-wrap">
         <span class="font-mono text-[14px] text-ios-blue font-medium">{{recordKey}}</span>
         <span class="op-badge op-DEDUP_SKIP">v{{version}}</span>
         <span class="text-[11px] text-ink-500 font-mono ml-auto">{{createdAt}} · {{createdBy}}</span>
+        <svg class="row-chevron h-4 w-4 text-ink-500 transition-transform" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
     </div>
-    <details>
-        <summary class="text-[12px] text-ink-700 cursor-pointer select-none hover:text-ios-blue">View JSON</summary>
-        <pre class="json-box mt-2">{{dataJson}}</pre>
-    </details>
-    <div class="flex items-center gap-2 justify-end">
-        <button onclick="event.stopPropagation(); editEntry('{{recordKey}}', this)" data-rk-data="{{dataJson}}" data-testid="entry-edit-{{recordKey}}"
-                class="btn-secondary press text-[12px] px-4 py-2">Edit</button>
-        <button onclick="event.stopPropagation(); deleteEntry('{{recordKey}}')" data-testid="entry-delete-{{recordKey}}"
-                class="btn-danger press text-[12px] px-4 py-2">
-            Delete
-        </button>
+    <!-- Expanded body — toggled by toggleEntryRow() -->
+    <div class="row-expanded hidden grid gap-2 pt-1">
+        <pre class="json-box text-[11px] max-h-[40vh] overflow-auto scrollbar" data-testid="entry-json-{{recordKey}}">{{dataJson}}</pre>
+        <div class="flex items-center gap-2 justify-end flex-wrap">
+            <button onclick="event.stopPropagation(); copyRowJson(this)" data-testid="entry-copy-{{recordKey}}"
+                    class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">Copy JSON</button>
+            <button onclick="event.stopPropagation(); editEntry('{{recordKey}}', this)" data-rk-data="{{dataJson}}" data-testid="entry-edit-{{recordKey}}"
+                    class="btn-secondary press text-[12px] px-4 py-2">Edit</button>
+            <button onclick="event.stopPropagation(); deleteEntry('{{recordKey}}')" data-testid="entry-delete-{{recordKey}}"
+                    class="btn-danger press text-[12px] px-4 py-2">Delete</button>
+        </div>
     </div>
 </li>
 {{/rows}}
@@ -1376,16 +1378,18 @@ async function selectTable(name) {
         </details>
       </div>
 
-      <!-- ============= PL/SQL-style query ============= -->
+      <!-- ============= PL/SQL-style multi-condition query builder ============= -->
       <div class="ios-card p-5 mb-3 grid gap-3" data-testid="query-card">
           <div class="flex items-center justify-between flex-wrap gap-2">
               <div>
-                  <div class="section-label">Query — <span class="text-ink-500 normal-case font-normal"><code class="font-mono text-ink-700">SELECT</code> columns <code class="font-mono text-ink-700">FROM</code> table <code class="font-mono text-ink-700">WHERE</code> field op value</span></div>
+                  <div class="section-label">Query — <span class="text-ink-500 normal-case font-normal"><code class="font-mono text-ink-700">SELECT</code> columns <code class="font-mono text-ink-700">FROM</code> table <code class="font-mono text-ink-700">WHERE</code> condition <em>AND/OR</em> condition…</span></div>
               </div>
               <button onclick="copyQueryAsCurl()" data-testid="query-curl-btn"
                       class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill" title="Copy as curl">Copy as cURL</button>
           </div>
-          <div class="grid md:grid-cols-[1.4fr_1.4fr_1.2fr_1fr_1.4fr_auto_auto] gap-2 items-end">
+
+          <!-- Header row: FROM + SELECT (the conditions live below in their own list) -->
+          <div class="grid md:grid-cols-[1.4fr_2.2fr] gap-2 items-end">
               <label class="grid gap-1">
                   <span class="section-label">FROM (table)</span>
                   <select id="qb-table" data-testid="qb-table" class="ios-input text-[12px] font-mono"
@@ -1401,68 +1405,61 @@ async function selectTable(name) {
                   <span class="section-label">SELECT (columns)</span>
                   <input id="qb-fields" data-testid="qb-fields"
                          class="ios-input text-[12px] font-mono"
-                         placeholder="recordKey,data.email,…  (blank = *)"/>
+                         placeholder="recordKey,data.email,…  (blank = all columns)"/>
               </label>
-              <label class="grid gap-1">
-                  <span class="section-label">WHERE field</span>
-                  <select id="qb-field" data-testid="qb-field" class="ios-input text-[12px] font-mono"
-                          onchange="refreshValueSuggestionsForQuery()">
-                      <option value="">(none — list all)</option>
-                      <option value="recordKey">recordKey  ←  PK</option>
-                      ${(() => {
-                          if (!schema || !schema.properties) return '';
-                          return Object.keys(schema.properties).map(k => `<option value="data.${escapeHtml(k)}">data.${escapeHtml(k)}</option>`).join('');
-                      })()}
-                  </select>
-              </label>
-              <label class="grid gap-1">
-                  <span class="section-label">Operator</span>
-                  <select id="qb-op" data-testid="qb-op" class="ios-input text-[12px]">
-                      <option value="equals">=  (equals)</option>
-                      <option value="contains">contains</option>
-                      <option value="startsWith">starts with</option>
-                  </select>
-              </label>
-              <label class="grid gap-1">
-                  <span class="section-label">Value</span>
-                  <input id="qb-value" data-testid="qb-value"
-                         class="ios-input text-[12px] font-mono"
-                         placeholder="e.g. alice@acme.io  or  admin"
-                         list="qb-value-suggestions"/>
-                  <datalist id="qb-value-suggestions"></datalist>
-              </label>
-              <button onclick="runQuery()" data-testid="qb-run-btn"
-                      class="btn-primary press text-[13px] px-4 py-2.5">Run</button>
+          </div>
+
+          <!-- WHERE clause: dynamic list of condition rows -->
+          <div class="grid gap-1.5">
+              <span class="section-label">WHERE</span>
+              <div id="qb-conditions" data-testid="qb-conditions" class="grid gap-1.5"></div>
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <button onclick="addQueryCondition()" data-testid="qb-add-condition-btn"
+                          class="btn-ghost press text-[12px] px-3 py-1.5 border border-hairline rounded-pill">+ Add condition</button>
+                  <div class="text-[11px] text-ink-500 italic" id="qb-help">
+                      Tip: <code class="font-mono">contains</code> / <code class="font-mono">startsWith</code> / <code class="font-mono">endsWith</code> are case-insensitive; <code class="font-mono">in</code> takes comma-separated values; date ops accept ISO timestamps.
+                  </div>
+              </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-1 border-t border-hairline">
+              <div id="qb-status" data-testid="qb-status" class="text-[11px] font-mono text-ink-500 mr-auto"></div>
               <button onclick="resetQuery()" data-testid="qb-reset-btn"
                       class="btn-ghost press text-[12px] px-3 py-2 border border-hairline rounded-pill">Reset</button>
+              <button onclick="runQuery()" data-testid="qb-run-btn"
+                      class="btn-primary press text-[13px] px-5 py-2">Run</button>
           </div>
-          <div id="qb-status" data-testid="qb-status" class="text-[11px] font-mono text-ink-500"></div>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
-          <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
-               data-template="entries-tpl">
-            <div class="text-[13px] text-ink-500 italic px-2 py-3">Loading entries…</div>
-          </div>
+          <div data-testid="entries-frame" class="ios-card p-2 grid gap-2 self-start"
+               style="max-height: 65vh; min-height: 280px;">
+              <div id="entries-grid-${escapeHtml(name)}" data-testid="entries-grid"
+                   data-template="entries-tpl"
+                   class="overflow-y-auto scrollbar pr-1"
+                   style="max-height: calc(65vh - 60px);">
+                <div class="text-[13px] text-ink-500 italic px-2 py-3">Loading entries…</div>
+              </div>
 
-          <!-- Cursor / page controls -->
-          <div class="flex items-center justify-between gap-2 mt-1.5 px-1" data-testid="entries-pager">
-              <div class="text-[11px] text-ink-500" id="entries-pager-status">page 1</div>
-              <div class="flex items-center gap-1.5">
-                  <label class="text-[11px] text-ink-500">Rows/page
-                      <select id="entries-page-size" data-testid="entries-page-size"
-                              onchange="window.__pageSize = parseInt(this.value, 10); window.__pageOffset = 0; loadEntries('${escapeHtml(name)}')"
-                              class="ios-input text-[11px] py-0.5 px-1 ml-1">
-                          <option>25</option>
-                          <option selected>50</option>
-                          <option>100</option>
-                          <option>200</option>
-                      </select>
-                  </label>
-                  <button onclick="entriesPagePrev('${escapeHtml(name)}')" data-testid="entries-prev-btn"
-                          class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">‹ Prev</button>
-                  <button onclick="entriesPageNext('${escapeHtml(name)}')" data-testid="entries-next-btn"
-                          class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">Next ›</button>
+              <!-- Cursor / page controls -->
+              <div class="flex items-center justify-between gap-2 mt-1.5 px-1 border-t border-hairline pt-2" data-testid="entries-pager">
+                  <div class="text-[11px] text-ink-500" id="entries-pager-status">page 1</div>
+                  <div class="flex items-center gap-1.5">
+                      <label class="text-[11px] text-ink-500">Rows/page
+                          <select id="entries-page-size" data-testid="entries-page-size"
+                                  onchange="window.__pageSize = parseInt(this.value, 10); window.__pageOffset = 0; loadEntries('${escapeHtml(name)}')"
+                                  class="ios-input text-[11px] py-0.5 px-1 ml-1">
+                              <option>25</option>
+                              <option selected>50</option>
+                              <option>100</option>
+                              <option>200</option>
+                          </select>
+                      </label>
+                      <button onclick="entriesPagePrev('${escapeHtml(name)}')" data-testid="entries-prev-btn"
+                              class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">‹ Prev</button>
+                      <button onclick="entriesPageNext('${escapeHtml(name)}')" data-testid="entries-next-btn"
+                              class="btn-ghost press text-[11px] px-2 py-1 border border-hairline rounded-pill">Next ›</button>
+                  </div>
               </div>
           </div>
 
@@ -1510,6 +1507,13 @@ async function selectTable(name) {
     loadEntries(name);
     window.__currentTable = name;
     window.__pageOffset = 0;   // reset cursor when switching tables
+    // Seed one empty condition row in the query builder.
+    const qbList = document.getElementById('qb-conditions');
+    if (qbList) {
+        qbList.innerHTML = '';
+        __qbRowSeq = 0;
+        addQueryCondition();
+    }
     // Populate the schema-aware recipe chips and the persistent invocation history.
     renderRecipes();
     historyRenderAll();
@@ -2886,20 +2890,170 @@ async function onQueryTableChange() {
 }
 
 function refreshValueSuggestionsForQuery() {
-    const table = document.getElementById('qb-table').value;
-    const field = document.getElementById('qb-field').value;
-    if (!table || !field || field === 'recordKey') {
-        document.getElementById('qb-value-suggestions').innerHTML = '';
+    // No-op now — each condition row manages its own datalist if any.
+}
+
+// =====================================================================
+// Multi-condition query builder (PL/SQL-style WHERE)
+// =====================================================================
+// Operators offered to users. {needsValue:false} skips the VALUE input.
+// {pair:true} swaps in a second VALUE input for BETWEEN-style ops.
+// {dateType:true} renders the inputs as datetime-local pickers.
+const QUERY_OPS = [
+    { v: 'equals',       label: '=  equals',         needsValue: true  },
+    { v: 'notEquals',    label: '≠  not equals',     needsValue: true  },
+    { v: 'contains',     label: 'contains',          needsValue: true  },
+    { v: 'notContains',  label: "doesn't contain",   needsValue: true  },
+    { v: 'startsWith',   label: 'starts with',       needsValue: true  },
+    { v: 'endsWith',     label: 'ends with',         needsValue: true  },
+    { v: 'regex',        label: 'matches regex',     needsValue: true  },
+    { v: 'in',           label: 'in (a,b,c)',        needsValue: true  },
+    { v: 'notIn',        label: 'not in (a,b,c)',    needsValue: true  },
+    { v: 'gt',           label: '>   greater than',  needsValue: true  },
+    { v: 'gte',          label: '≥   greater or eq', needsValue: true  },
+    { v: 'lt',           label: '<   less than',     needsValue: true  },
+    { v: 'lte',          label: '≤   less or eq',    needsValue: true  },
+    { v: 'between',      label: 'between',           needsValue: true, pair: true },
+    { v: 'before',       label: 'date before',       needsValue: true, dateType: true },
+    { v: 'after',        label: 'date after',        needsValue: true, dateType: true },
+    { v: 'onDate',       label: 'on date (YYYY-MM-DD)', needsValue: true, dateType: true },
+    { v: 'betweenDates', label: 'between dates',     needsValue: true, pair: true, dateType: true },
+    { v: 'isNull',       label: 'is null',           needsValue: false },
+    { v: 'isNotNull',    label: 'is not null',       needsValue: false },
+];
+
+let __qbRowSeq = 0;
+
+function fieldOptionsHtml(schema, selected) {
+    const parts = [`<option value="">(any field)</option>`,
+                   `<option value="recordKey" ${selected === 'recordKey' ? 'selected' : ''}>recordKey  ← PK</option>`];
+    if (schema && schema.properties) {
+        for (const k of Object.keys(schema.properties)) {
+            const v = 'data.' + k;
+            parts.push(`<option value="${escapeHtml(v)}" ${selected === v ? 'selected' : ''}>data.${escapeHtml(k)}</option>`);
+        }
+    }
+    return parts.join('');
+}
+
+function addQueryCondition(prefill) {
+    const list = document.getElementById('qb-conditions');
+    if (!list) return;
+    const id = ++__qbRowSeq;
+    const isFirst = list.children.length === 0;
+    const schema = window.__currentSchema;
+    const row = document.createElement('div');
+    row.className = 'qb-row grid gap-1.5 items-end';
+    row.style.gridTemplateColumns = '76px 1.4fr 1.5fr 1.6fr auto';
+    row.dataset.rowId = String(id);
+    row.dataset.testid = 'qb-row-' + id;
+    row.setAttribute('data-testid', 'qb-row-' + id);
+    row.innerHTML = `
+        <div class="grid gap-1">
+            <span class="section-label">${isFirst ? '&nbsp;' : 'AND/OR'}</span>
+            <select data-role="connector" data-testid="qb-row-${id}-connector"
+                    class="ios-input text-[11px] ${isFirst ? 'invisible' : ''}">
+                <option value="AND" ${(prefill && prefill.connector === 'OR') ? '' : 'selected'}>AND</option>
+                <option value="OR"  ${(prefill && prefill.connector === 'OR') ? 'selected' : ''}>OR</option>
+            </select>
+        </div>
+        <div class="grid gap-1">
+            <span class="section-label">${isFirst ? 'WHERE field' : 'field'}</span>
+            <select data-role="field" data-testid="qb-row-${id}-field" class="ios-input text-[12px] font-mono">
+                ${fieldOptionsHtml(schema, prefill && prefill.field)}
+            </select>
+        </div>
+        <div class="grid gap-1">
+            <span class="section-label">operator</span>
+            <select data-role="op" data-testid="qb-row-${id}-op" class="ios-input text-[12px]"
+                    onchange="updateQueryRowInputs(this.closest('.qb-row'))">
+                ${QUERY_OPS.map(o => `<option value="${o.v}" ${(prefill && prefill.op === o.v) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+            </select>
+        </div>
+        <div class="grid gap-1">
+            <span class="section-label">value</span>
+            <div class="grid gap-1 grid-cols-1" data-role="value-wrap">
+                <input data-role="value" data-testid="qb-row-${id}-value"
+                       class="ios-input text-[12px] font-mono"
+                       placeholder="e.g. alice@acme.io"
+                       value="${prefill && prefill.value != null ? escapeHtml(String(prefill.value)) : ''}"/>
+            </div>
+        </div>
+        <div class="grid gap-1">
+            <span class="section-label">&nbsp;</span>
+            <button type="button" data-testid="qb-row-${id}-remove" title="Remove condition"
+                    onclick="this.closest('.qb-row').remove()"
+                    class="btn-ghost press text-[14px] px-3 py-1.5 border border-hairline rounded-pill">×</button>
+        </div>`;
+    list.appendChild(row);
+    updateQueryRowInputs(row);
+    return row;
+}
+
+// React to operator changes — toggle value input visibility / second input / type.
+function updateQueryRowInputs(row) {
+    const opSel = row.querySelector('[data-role="op"]');
+    const wrap  = row.querySelector('[data-role="value-wrap"]');
+    if (!opSel || !wrap) return;
+    const op = QUERY_OPS.find(o => o.v === opSel.value) || QUERY_OPS[0];
+
+    const existing = wrap.querySelector('[data-role="value"]');
+    const existing2 = wrap.querySelector('[data-role="value2"]');
+    const v1 = existing ? existing.value : '';
+    const v2 = existing2 ? existing2.value : '';
+
+    if (!op.needsValue) {
+        wrap.innerHTML = `<input type="hidden" data-role="value" value=""/>
+            <div class="text-[11px] text-ink-500 italic px-1 py-1">no value needed</div>`;
         return;
     }
-    refreshValueSuggestions(table, field.replace(/^data\./, ''));
+    const type = op.dateType ? 'datetime-local' : 'text';
+    if (op.pair) {
+        wrap.style.gridTemplateColumns = '1fr 1fr';
+        wrap.innerHTML = `
+            <input type="${type}" data-role="value"  class="ios-input text-[12px] font-mono"
+                   placeholder="${op.dateType ? '' : 'from'}" value="${escapeHtml(v1)}"/>
+            <input type="${type}" data-role="value2" class="ios-input text-[12px] font-mono"
+                   placeholder="${op.dateType ? '' : 'to'}"   value="${escapeHtml(v2)}"/>`;
+    } else {
+        wrap.style.gridTemplateColumns = '1fr';
+        const placeholder = op.v === 'in' || op.v === 'notIn'
+            ? 'a, b, c (comma-separated)'
+            : op.v === 'regex' ? '^[A-Z]+$'
+            : op.dateType ? '' : 'e.g. alice@acme.io';
+        wrap.innerHTML = `<input type="${type}" data-role="value"
+                                  class="ios-input text-[12px] font-mono"
+                                  placeholder="${placeholder}"
+                                  value="${escapeHtml(v1)}"/>`;
+    }
+}
+
+function readQueryConditions() {
+    const list = document.getElementById('qb-conditions');
+    if (!list) return [];
+    return Array.from(list.querySelectorAll('.qb-row')).map((row, idx) => {
+        const field = row.querySelector('[data-role="field"]').value || '';
+        const op    = row.querySelector('[data-role="op"]').value;
+        const v1El  = row.querySelector('[data-role="value"]');
+        const v2El  = row.querySelector('[data-role="value2"]');
+        const connEl = row.querySelector('[data-role="connector"]');
+        const c = { field, op, connector: idx === 0 ? null : (connEl ? connEl.value : 'AND') };
+        const opDef = QUERY_OPS.find(o => o.v === op) || {};
+        if (opDef.needsValue) {
+            const v1 = v1El ? v1El.value : '';
+            if (op === 'in' || op === 'notIn') {
+                c.value = v1.split(',').map(s => s.trim()).filter(Boolean);
+            } else {
+                c.value = coerce(v1);
+            }
+            if (opDef.pair && v2El) c.value2 = coerce(v2El.value);
+        }
+        return c;
+    }).filter(c => c.field || c.op === 'isNull' || c.op === 'isNotNull');
 }
 
 async function runQuery() {
     const table     = document.getElementById('qb-table').value.trim();
-    const field     = document.getElementById('qb-field').value.trim();   // 'recordKey' | 'data.<col>'
-    const op        = document.getElementById('qb-op').value;
-    const valueRaw  = document.getElementById('qb-value').value;
     const fieldsCsv = document.getElementById('qb-fields').value.trim();
     window.__entryFields = fieldsCsv;
 
@@ -2908,28 +3062,50 @@ async function runQuery() {
         return;
     }
 
-    // Fast path — equals on recordKey resolves to a direct GET (PK lookup).
-    if (field === 'recordKey' && op === 'equals' && valueRaw !== '') {
-        const url = apiBase() + '/tables/' + encodeURIComponent(table) +
-                    '/entries/' + encodeURIComponent(valueRaw) +
-                    (fieldsCsv ? '?fields=' + encodeURIComponent(fieldsCsv) : '');
+    const conditions = readQueryConditions();
+
+    // Fast path — single equals on recordKey resolves to a direct GET (PK lookup).
+    if (conditions.length === 1
+        && conditions[0].field === 'recordKey'
+        && conditions[0].op === 'equals'
+        && conditions[0].value !== '' && conditions[0].value != null) {
+        const url = apiBase() + '/tables/' + encodeURIComponent(table)
+                  + '/entries/' + encodeURIComponent(String(conditions[0].value))
+                  + (fieldsCsv ? '?fields=' + encodeURIComponent(fieldsCsv) : '');
         const t0 = performance.now();
         const res = await apiFetch(url, { method: 'GET' });
-        const dt = Math.round(performance.now() - t0);
+        const dt  = Math.round(performance.now() - t0);
         const body = await res.text();
         let parsed; try { parsed = JSON.parse(body); } catch { parsed = body; }
         renderEntriesIntoGrid(table, res.ok ? [parsed] : []);
         document.getElementById('qb-status').textContent =
-            `${res.status} · ${res.ok ? 1 : 0} row(s) · ${dt} ms · GET /entries/${valueRaw}`;
+            `${res.status} · ${res.ok ? 1 : 0} row(s) · ${dt} ms · GET /entries/${conditions[0].value}`;
         showLiveResponse('GET', url, null, res, parsed, dt);
         return;
     }
 
-    // Build the unified /query body (works for any field, including recordKey).
-    const body = { table, field, op, value: coerce(valueRaw), fields: fieldsCsv || null };
-    const url = apiBase() + '/query';
-    const t0 = performance.now();
-    const res = await apiFetch(url, {
+    // Empty conditions → list everything (with optional projection).
+    if (conditions.length === 0) {
+        const url = apiBase() + '/tables/' + encodeURIComponent(table) + '/entries'
+                  + (fieldsCsv ? '?fields=' + encodeURIComponent(fieldsCsv) : '');
+        const t0 = performance.now();
+        const res = await apiFetch(url, { method: 'GET' });
+        const dt = Math.round(performance.now() - t0);
+        const text = await res.text();
+        let rows; try { rows = JSON.parse(text); } catch { rows = []; }
+        if (!Array.isArray(rows)) rows = [];
+        renderEntriesIntoGrid(table, rows);
+        document.getElementById('qb-status').textContent =
+            `${res.status} · ${rows.length} row(s) · ${dt} ms · GET /entries`;
+        showLiveResponse('GET', url, null, res, rows, dt);
+        return;
+    }
+
+    // Generic path — POST /query2 with the full condition list.
+    const body = { table, conditions, fields: fieldsCsv || null };
+    const url  = apiBase() + '/query2';
+    const t0   = performance.now();
+    const res  = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -2940,26 +3116,24 @@ async function runQuery() {
     if (!Array.isArray(rows)) rows = [];
     renderEntriesIntoGrid(table, rows);
     document.getElementById('qb-status').textContent =
-        `${res.status} · ${rows.length} row(s) · ${dt} ms · POST /query`;
+        `${res.status} · ${rows.length} row(s) · ${dt} ms · POST /query2 · ${conditions.length} condition${conditions.length === 1 ? '' : 's'}`;
     showLiveResponse('POST', url, body, res, rows, dt);
 }
 
 function resetQuery() {
     document.getElementById('qb-fields').value = '';
-    document.getElementById('qb-field').value  = '';
-    document.getElementById('qb-value').value  = '';
+    document.getElementById('qb-conditions').innerHTML = '';
     document.getElementById('qb-status').textContent = '';
     window.__entryFields = '';
+    addQueryCondition();  // always keep one starter row
     const table = document.getElementById('qb-table').value || window.__currentTable;
     if (table) loadEntries(table);
 }
 
 function copyQueryAsCurl() {
     const table     = document.getElementById('qb-table').value.trim() || '<table>';
-    const field     = document.getElementById('qb-field').value.trim();
-    const op        = document.getElementById('qb-op').value;
-    const valueRaw  = document.getElementById('qb-value').value;
     const fieldsCsv = document.getElementById('qb-fields').value.trim();
+    const conditions = readQueryConditions();
     const conn      = getConn();
     const origin    = window.location.origin;
     const authHdr   = (conn.mode === 'bearer')
@@ -2967,16 +3141,49 @@ function copyQueryAsCurl() {
         : `-H "X-API-Key: ${conn.token || '<api-key>'}"`;
 
     let curl;
-    if (field === 'recordKey' && op === 'equals' && valueRaw !== '') {
-        // PK lookup — GET
+    if (conditions.length === 1 && conditions[0].field === 'recordKey' && conditions[0].op === 'equals'
+        && conditions[0].value !== '' && conditions[0].value != null) {
         const qs = fieldsCsv ? `?fields=${encodeURIComponent(fieldsCsv)}` : '';
-        curl = `curl "${origin}${apiBase()}/tables/${encodeURIComponent(table)}/entries/${encodeURIComponent(valueRaw)}${qs}" ${authHdr}`;
+        curl = `curl "${origin}${apiBase()}/tables/${encodeURIComponent(table)}/entries/${encodeURIComponent(String(conditions[0].value))}${qs}" ${authHdr}`;
     } else {
-        const body = { table, field, op, value: coerce(valueRaw), fields: fieldsCsv || null };
-        curl = `curl -X POST "${origin}${apiBase()}/query" \\\n  -H "Content-Type: application/json" \\\n  ${authHdr} \\\n  -d '${JSON.stringify(body).replace(/'/g, `'\\''`)}'`;
+        const body = { table, conditions, fields: fieldsCsv || null };
+        curl = `curl -X POST "${origin}${apiBase()}/query2" \\\n  -H "Content-Type: application/json" \\\n  ${authHdr} \\\n  -d '${JSON.stringify(body).replace(/'/g, `'\\''`)}'`;
     }
     navigator.clipboard.writeText(curl).then(() => toast('cURL copied to clipboard'))
         .catch(() => prompt('Copy this cURL:', curl));
+}
+
+// =====================================================================
+// Master-detail expand-on-click for the entries frame.
+// Clicking a row toggles its inline expansion and mirrors the JSON into
+// the right-side preview pane (which still doubles as an "pinned" view).
+// =====================================================================
+function toggleEntryRow(event, li) {
+    // Ignore clicks on action buttons / interactive descendants.
+    if (event.target.closest('button,a,select,input,textarea')) return;
+    const wasOpen = li.classList.contains('is-expanded');
+    // Collapse siblings — only one row open at a time.
+    document.querySelectorAll('[data-testid^="entry-row-"].is-expanded').forEach(el => {
+        el.classList.remove('is-expanded', 'ring-2', 'ring-ios-blue');
+        const body = el.querySelector('.row-expanded'); if (body) body.classList.add('hidden');
+        const chev = el.querySelector('.row-chevron');  if (chev) chev.style.transform = '';
+    });
+    if (wasOpen) return;
+    li.classList.add('is-expanded', 'ring-2', 'ring-ios-blue');
+    const body = li.querySelector('.row-expanded'); if (body) body.classList.remove('hidden');
+    const chev = li.querySelector('.row-chevron');  if (chev) chev.style.transform = 'rotate(90deg)';
+    // Mirror into the right-side preview pane too (kept for "pin while scrolling").
+    if (typeof selectEntryRow === 'function') selectEntryRow(li);
+    li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function copyRowJson(btn) {
+    const li = btn.closest('li');
+    const pre = li && li.querySelector('pre.json-box');
+    if (!pre) return;
+    navigator.clipboard.writeText(pre.textContent || '')
+        .then(() => toast('JSON copied'))
+        .catch(() => prompt('Copy:', pre.textContent || ''));
 }
 
 // ============== Ingest / update an entry ==============

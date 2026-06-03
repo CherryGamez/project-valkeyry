@@ -1,0 +1,50 @@
+{
+  "summary": "Tested the new multi-condition /query2 advanced query (backend) and the multi-condition query-builder + scroll/expand-in-place results UI (frontend) against the preview URL. Backend: 14/14 pytest cases green covering all 19 operators (equals/notEquals/contains/notContains/startsWith/endsWith/regex/in/notIn/gt/gte/lt/lte/between/isNull/isNotNull/before/after/onDate/betweenDates), per-row AND/OR connectors, CSV vs array `in` value forms, missing-table 400, and backward-compat for legacy POST /query. Frontend: login admin/admin → /, seeded localStorage tenant/apikey, clicked 'users' sidebar → starter qb-row-1 auto-seeded; add-condition adds row with visible AND/OR connector on rows 2+ (hidden on row 1); op=between/betweenDates renders two value inputs; op=isNull/isNotNull hides value and shows 'no value needed' hint; running endsWith @acme.io AND role in 'admin, editor' returned exactly alice+bob, qb-status showed '200 · 2 row(s) · 56 ms · POST /query2 · 2 conditions'; reset clears all rows but keeps one starter; clicking an entry row expands inline (ring-2 + JSON visible) and only one row stays expanded; clicking same row again collapses; Copy-as-cURL produced 'curl -X POST .../query2 ... -d ' with proper conditions array including endsWith + AND connector. Topbar nav-admin-link/nav-tools-link/logout-btn still present. Note: previous iteration's logout-btn bug was NOT explicitly re-tested in this iteration (out of scope for this feature) — flag it for separate verification.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Virtual Tables → entries-frame wrapper",
+        "issues": [
+          "The element tagged data-testid='entries-frame' has computed `overflow-y: visible`, not 'auto'. Functionally scroll still works because the INNER #entries-grid-{name} has Tailwind class 'overflow-y-auto' plus max-height: calc(65vh - 60px), so when many rows render the inner div scrolls correctly. Recommend either moving the data-testid to the inner scroll container, or adding 'overflow-y: auto' to the outer entries-frame so the testid matches the contract in the review request."
+        ]
+      },
+      {
+        "screen": "all static pages (carry-over from iteration 1)",
+        "issues": ["cdn.tailwindcss.com still loaded at runtime — Tailwind itself warns 'should not be used in production'. Acceptable for preview; flag for the Java build pipeline."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_query_advanced.py",
+    "/app/backend/tests/test_auth_admin_tools.py",
+    "/app/test_reports/pytest/query_advanced_results.xml"
+  ],
+  "action_items": [
+    "Optional polish: align entries-frame data-testid with the scrollable element (either move data-testid to #entries-grid-{name} or add overflow-y: auto to .ios-card wrapper). Functionality is correct, only the contract advertised in the review request says 'entries-frame' should be the scrollable wrapper.",
+    "Carry-over from iteration_1: logout-btn click on / still needs verification (not retested this round).",
+    "Java parity: ensure UnifiedQueryController.queryAdvanced returns the same shape — Python mock projects rows as {recordKey, data:{...}, version, ...}. Confirm Java DTO matches so the UI works against the real Spring backend too."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 988 lines (was 891) — getting close to the 700-line guideline; consider splitting query_advanced + predicate logic into a separate module before adding more operators.",
+    "/api/v1/tenants/{tenant_id}/query2 has NO auth guard (no _require_auth), matching the legacy /query — fine for the preview mock but document that the Java side enforces tenant scoping via SafeBearerTokenAuthenticationConverter.",
+    "eval_cond swallows ALL exceptions and returns False (line 589-590). That hides bugs — at minimum log the exception so a malformed regex doesn't silently zero out the result set.",
+    "eval_cond falls through to `raise HTTPException(400)` for unsupported ops but the raise is unreachable because all ops are matched or caught by the bare `except Exception` above it. Move the raise BEFORE the except, or check `if op not in SUPPORTED_OPS: raise ...` up front.",
+    "Date parsing helper parse_dt accepts ints as epoch seconds but compares with isoformat strings — works because cd/vd are both _dt — OK; just document.",
+    "Front-end index.html is now 3545 lines — Phase-1 fine, but extract QUERY_OPS + qb-* helpers into /static/assets/query-builder.js before the next feature."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_query_advanced.py (created)",
+    "/app/test_reports/iteration_2.json (created)",
+    "/app/test_reports/pytest/query_advanced_results.xml (generated)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% of in-scope flows (1 cosmetic naming issue on entries-frame)"},
+  "test_credentials": "admin/admin (from /app/memory/test_credentials.md). Tenant: demo-tenant, API key: plugin-test-key — both seeded in mock.",
+  "seed_data_creation": "No new seed data created. Used pre-seeded users table in demo-tenant: alice@acme.io (admin, tags=[internal,vip]), bob@acme.io (editor, tags=[ga]), carol@acme.io (viewer, tags=[beta]). NOTE: there appear to be additional 'user1@example.com'…'user5@example.com' rows from earlier iterations visible in the entries grid — they are NOT @acme.io so they do not affect the endsWith filter tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Multi-condition query builder + expand-in-place is fully working in the Python mock + UI. Backend tests live in /app/backend/tests/test_query_advanced.py (run with: `export $(grep -v '^#' /app/frontend/.env | xargs) && pytest /app/backend/tests/ -v`). When testing the UI, the row IDs (qb-row-N) drift because __qbRowSeq is NOT reset on resetQuery() — prefer selecting via `#qb-conditions .qb-row` + [data-role='field|op|value|value2|connector'] rather than the numeric testid. To capture Copy-as-cURL output without clipboard permissions, monkey-patch navigator.clipboard.writeText to resolve a promise with the string. Java side is in /app/valkeyry-config/...UnifiedQueryController.java — could not exercise from this pod (no JVM); main agent confirms mvn test 52/52 green.",
+  "rca_of_the_issue": "N/A — no bugs blocking the feature. The one finding (entries-frame overflow-y: visible) is a naming/contract mismatch, not a functional defect: the inner #entries-grid-{name} has overflow-y-auto with max-height so the user sees the intended scrollable list. Fix is either 1-line CSS on the wrapper or moving the data-testid."
+}

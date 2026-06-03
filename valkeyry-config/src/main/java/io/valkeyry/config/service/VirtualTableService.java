@@ -11,16 +11,20 @@ import io.valkeyry.config.error.IdempotentDuplicateException;
 import io.valkeyry.config.error.VirtualTableNotFoundException;
 import io.valkeyry.config.repo.VirtualTableEntryRepository;
 import io.valkeyry.config.repo.VirtualTableRegistryRepository;
+import io.valkeyry.config.service.query.PredicateCompiler;
 import io.valkeyry.config.validation.JsonSchemaValidatorService;
 import io.valkeyry.config.validation.PayloadFingerprint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -46,19 +50,22 @@ public class VirtualTableService {
     private final ObjectMapper mapper;
     private final TransactionalOperator tx;
     private final ConfigAuditService audit;
+    private final DatabaseClient db;
 
     public VirtualTableService(VirtualTableRegistryRepository registries,
                                VirtualTableEntryRepository entries,
                                JsonSchemaValidatorService validator,
                                ObjectMapper mapper,
                                TransactionalOperator tx,
-                               ConfigAuditService audit) {
+                               ConfigAuditService audit,
+                               DatabaseClient db) {
         this.registries = registries;
         this.entries = entries;
         this.validator = validator;
         this.mapper = mapper;
         this.tx = tx;
         this.audit = audit;
+        this.db = db;
     }
 
     // -----------------------------------------------------------------------
@@ -292,6 +299,56 @@ public class VirtualTableService {
     public Flux<EntryView> search(String tenantId, String tableName, JsonNode criteria, int limit, int offset) {
         String criteriaJson = (criteria == null || criteria.isNull()) ? "{}" : criteria.toString();
         return entries.search(tenantId, tableName, criteriaJson, limit, offset).map(this::toView);
+    }
+
+    /**
+     * PL/SQL-style multi-condition search compiled by {@link PredicateCompiler}.
+     *
+     * <p>The list of {@link PredicateCompiler.Condition} rows is turned into a single
+     * parameterised {@code WHERE} fragment that's appended to the standard
+     * {@code tenant_id / table_name / is_latest=true} guard, then executed against the
+     * {@code virtual_table_entry} table via R2DBC's {@link DatabaseClient}.</p>
+     */
+    public Flux<EntryView> searchAdvanced(String tenantId, String tableName,
+                                          List<PredicateCompiler.Condition> conditions,
+                                          int limit, int offset) {
+        PredicateCompiler.Compiled compiled = PredicateCompiler.compile(conditions);
+        String sql = """
+                SELECT * FROM virtual_table_entry
+                 WHERE tenant_id  = :tenantId
+                   AND table_name = :tableName
+                   AND is_latest  = true
+                   AND (%s)
+                 ORDER BY record_key
+                 LIMIT :limit OFFSET :offset
+                """.formatted(compiled.sql());
+
+        DatabaseClient.GenericExecuteSpec spec = db.sql(sql)
+                .bind("tenantId", tenantId)
+                .bind("tableName", tableName)
+                .bind("limit", limit)
+                .bind("offset", offset);
+        for (Map.Entry<String, Object> e : compiled.params().entrySet()) {
+            spec = e.getValue() == null
+                    ? spec.bindNull(e.getKey(), String.class)
+                    : spec.bind(e.getKey(), e.getValue());
+        }
+        return spec.map((row, meta) -> {
+            VirtualTableEntry entry = new VirtualTableEntry();
+            entry.setId(row.get("id", UUID.class));
+            entry.setTenantId(row.get("tenant_id", String.class));
+            entry.setTableName(row.get("table_name", String.class));
+            entry.setRecordKey(row.get("record_key", String.class));
+            Long ver = row.get("version", Long.class);
+            entry.setVersion(ver == null ? 0L : ver);
+            entry.setLatest(Boolean.TRUE.equals(row.get("is_latest", Boolean.class)));
+            entry.setPayloadHash(row.get("payload_hash", String.class));
+            entry.setData(row.get("data", Json.class));
+            Instant createdAt = row.get("created_at", Instant.class);
+            if (createdAt != null) entry.setCreatedAt(createdAt);
+            entry.setCreatedBy(row.get("created_by", String.class));
+            return entry;
+        }).all().map(this::toView);
     }
 
     // -----------------------------------------------------------------------

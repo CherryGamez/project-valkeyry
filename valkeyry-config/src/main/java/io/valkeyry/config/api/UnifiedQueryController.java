@@ -9,10 +9,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.valkeyry.config.security.TenantAccessGuard;
 import io.valkeyry.config.service.VirtualTableService;
+import io.valkeyry.config.service.query.PredicateCompiler;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Unified PL/SQL-style query endpoint.
@@ -105,4 +109,80 @@ public class UnifiedQueryController {
      *  can match against booleans, integers, arrays — not just strings. */
     public record QueryRequest(String table, String field, String op,
                                JsonNode value, String fields) {}
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  PL/SQL-style multi-condition query  (POST /query2)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Advanced multi-condition WHERE-builder.
+     *
+     * <p>Each row in {@link AdvancedQueryRequest#conditions()} carries its own connector
+     * ({@code AND}/{@code OR}) that joins it to the row before; the first row's connector
+     * is ignored. Supported ops are listed on {@link PredicateCompiler}.</p>
+     *
+     * <pre>
+     * POST /api/v1/tenants/{tenantId}/query2
+     * {
+     *   "table": "users",
+     *   "conditions": [
+     *     { "field": "data.email",  "op": "endsWith",  "value": "@acme.io" },
+     *     { "field": "data.role",   "op": "in",        "value": ["admin","writer"], "connector": "AND" },
+     *     { "field": "data.score",  "op": "between",   "value": 10, "value2": 100,  "connector": "OR" }
+     *   ],
+     *   "fields": "recordKey,data.email",
+     *   "limit":  100,
+     *   "offset": 0
+     * }
+     * </pre>
+     */
+    @PostMapping("/query2")
+    @Operation(summary = "Run a multi-condition PL/SQL-style query",
+               description = "Accepts a list of conditions joined by per-row AND/OR connectors. Supports equals/notEquals, contains, startsWith/endsWith, regex, in/notIn, gt/gte/lt/lte/between, isNull/isNotNull, before/after/onDate/betweenDates.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Matching rows (may be empty)"),
+        @ApiResponse(responseCode = "400", description = "Unsupported op, invalid field name, or malformed value")
+    })
+    public Flux<JsonNode> queryAdvanced(@PathVariable String tenantId,
+                                        @RequestBody AdvancedQueryRequest req,
+                                        Authentication auth) {
+        if (req.table() == null || req.table().isBlank()) {
+            return Flux.error(new IllegalArgumentException("'table' is required"));
+        }
+        int limit  = req.limit()  == null || req.limit()  <= 0 ? 1000 : req.limit();
+        int offset = req.offset() == null || req.offset() <  0 ?    0 : req.offset();
+
+        List<PredicateCompiler.Condition> conditions = new ArrayList<>();
+        if (req.conditions() != null) {
+            for (AdvancedCondition c : req.conditions()) {
+                if (c == null) continue;
+                conditions.add(new PredicateCompiler.Condition(
+                        c.field(), c.op(), c.value(), c.value2(), c.connector()));
+            }
+        }
+        return guard.check(auth, tenantId)
+                .thenMany(service.searchAdvanced(tenantId, req.table(), conditions, limit, offset))
+                .map(v -> FieldProjection.apply(mapper.valueToTree(v), req.fields(), mapper));
+    }
+
+    /** Body shape for {@link #queryAdvanced}. */
+    public record AdvancedQueryRequest(String table,
+                                       List<AdvancedCondition> conditions,
+                                       String fields,
+                                       Integer limit,
+                                       Integer offset) {}
+
+    /** One condition row in {@link AdvancedQueryRequest#conditions()}.
+     *
+     *  <ul>
+     *    <li>{@code field}: {@code recordKey} or {@code data.&lt;col&gt;} (dotted paths OK).</li>
+     *    <li>{@code op}: see {@link PredicateCompiler} JavaDoc.</li>
+     *    <li>{@code value}: primary value (string/number/array/null).</li>
+     *    <li>{@code value2}: required by {@code between} and {@code betweenDates}.</li>
+     *    <li>{@code connector}: {@code "AND"} (default) or {@code "OR"}. Ignored on the first row.</li>
+     *  </ul>
+     */
+    public record AdvancedCondition(String field, String op,
+                                    JsonNode value, JsonNode value2,
+                                    String connector) {}
 }
