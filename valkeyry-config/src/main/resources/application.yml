@@ -27,8 +27,14 @@ spring:
   application:
     name: valkeyry-config
   # ----- R2DBC (runtime, reactive) -----
+  # Note the `?schema=valkeyry_config` URL parameter: r2dbc-postgresql sets the
+  # session's search_path to this on every connection, so unqualified table
+  # references (admin_tenant, app_user, …) resolve under the right schema
+  # without each repository having to spell it out. The init script
+  # (`db/init/01-schema.sql`) also ALTERs the postgres role to default to the
+  # same search_path as belt-and-braces for any tools that bypass R2DBC.
   r2dbc:
-    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://0.0.0.0:5432/valkeyry_config}
+    url: ${VALKEYRY_CONFIG_R2DBC_URL:r2dbc:postgresql://0.0.0.0:5432/valkeyry_config?schema=valkeyry_config}
     username: ${VALKEYRY_CONFIG_DB_USER:valkeyry}
     password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
     pool:

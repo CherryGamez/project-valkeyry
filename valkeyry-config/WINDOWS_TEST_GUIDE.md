@@ -307,6 +307,27 @@ The same paths are exercised in CI by `LdapBasicAuthenticationManagerTest` (embe
 UnboundID directory) and `CompositeReactiveJwtDecoderTest` (in-process RSA key pair acting
 as a fake JWKS) — both pass under `mvn test`.
 
+### Troubleshooting
+
+**`relation "admin_tenant" does not exist`**
+- The init SQL didn't include the V4 admin tables on first boot. Pull the latest
+  `db/init/01-schema.sql` (it now ships every V1–V4 table inline, gated by
+  `IF NOT EXISTS`) and either drop the volume (`docker compose down -v` → re-up)
+  *or* apply the script manually:
+  ```powershell
+  Get-Content .\db\init\01-schema.sql | docker compose exec -T postgres psql -U postgres -d valkeyry_config
+  ```
+
+**`relation "<table>" does not exist` for any other table**
+- The R2DBC connection's `search_path` is missing. The application now defaults to
+  `r2dbc:postgresql://…/valkeyry_config?schema=valkeyry_config`; if you override
+  `VALKEYRY_CONFIG_R2DBC_URL` you must keep the `?schema=valkeyry_config` parameter.
+
+**Flyway "Detected resolved migration not applied to database: 4"**
+- Migrating from a pre-V4 build with existing data. Flyway will run V4 on next boot —
+  the migration is idempotent (`CREATE TABLE IF NOT EXISTS`) so it's safe even when
+  the init SQL already created the same tables.
+
 ---
 
 ## 4. UI tour — flexible config types (dropdown / checkbox / multi-choice)

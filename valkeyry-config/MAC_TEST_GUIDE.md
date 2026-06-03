@@ -236,7 +236,7 @@ a clean 401.
 
 ---
 
-## 3.5 Hybrid auth live: OpenLDAP + Keycloak sidecars
+## 3.5 Hybrid auth via OpenLDAP + Keycloak sidecars
 
 Spin up the full hybrid stack (Postgres + OpenLDAP + Keycloak + the app) using the
 `hybrid` Compose profile:
@@ -307,6 +307,37 @@ curl -s http://localhost:8081/api/v1/auth/me \
 The same paths are exercised in CI by `LdapBasicAuthenticationManagerTest` (embedded
 UnboundID directory) and `CompositeReactiveJwtDecoderTest` (in-process RSA key pair acting
 as a fake JWKS) — both pass under `mvn test`.
+
+### Troubleshooting
+
+**`relation "admin_tenant" does not exist`**
+- The init SQL didn't include the V4 admin tables on first boot. Re-pull the latest
+  `db/init/01-schema.sql` (it now ships every V1–V4 table inline, gated by
+  `IF NOT EXISTS`) and either drop the volume (`docker compose down -v` → re-up)
+  *or* run the script manually:
+  ```bash
+  docker compose exec -T postgres psql -U postgres -d valkeyry_config \
+      < db/init/01-schema.sql
+  ```
+- If Flyway is reporting "validate failed" after manually applying the SQL, run:
+  ```bash
+  docker compose exec postgres psql -U postgres -d valkeyry_config \
+      -c "INSERT INTO valkeyry_config.flyway_schema_history (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success) \
+          VALUES (4, '4', 'admin users and tenants', 'SQL', 'V4__admin_users_and_tenants.sql', 0, 'manual', 0, true) \
+          ON CONFLICT DO NOTHING;"
+  ```
+
+**`relation "<table>" does not exist` for any other table**
+- The R2DBC connection's `search_path` is missing. The application defaults now embed
+  `?schema=valkeyry_config` in the URL — make sure your override env var
+  (`VALKEYRY_CONFIG_R2DBC_URL`) also includes it, e.g.
+  `r2dbc:postgresql://localhost:5432/valkeyry_config?schema=valkeyry_config`.
+
+**Flyway "Detected resolved migration not applied to database: 4"**
+- You probably moved from a pre-V4 build of the app to a post-V4 build but already had
+  data. Flyway will run V4 on next boot — the migration is idempotent
+  (`CREATE TABLE IF NOT EXISTS`) so it's safe even if the init SQL already created the
+  same tables.
 
 ---
 
