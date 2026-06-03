@@ -235,6 +235,80 @@ a clean 401.
 
 ---
 
+## 3.5 Hybrid auth live: OpenLDAP + Keycloak sidecars
+
+Spin up the full hybrid stack (Postgres + OpenLDAP + Keycloak + the app) with the
+`hybrid` Compose profile:
+
+```powershell
+cd C:\projects\valkeyry-ecosystem\valkeyry-config
+docker compose -f docker-compose.dev.yml --profile hybrid up -d
+docker compose ps
+# Expect 4 containers: postgres, openldap, keycloak, app
+```
+
+### Seed data
+
+| Service   | Seed file                                | Notable accounts                                   |
+|-----------|------------------------------------------|----------------------------------------------------|
+| OpenLDAP  | `db/ldap/bootstrap.ldif`                 | `bob/secret` (ou=acme), `alice/s3cret` (acme+globex), `ops/opspw` (ops) |
+| Keycloak  | `db/keycloak/realm-export.json`          | `alice/s3cret` (writer, tenants=acme,globex), `admin-sso/sso-admin` (admin) |
+
+### Verify the LDAP track
+
+```powershell
+# Direct LDAP login through /api/v1/auth/login (this hits AuthService → LdapBasicAuthenticationManager)
+$res = Invoke-RestMethod -Method Post `
+    -Uri "http://localhost:8081/api/v1/auth/login" `
+    -ContentType "application/json" `
+    -Body '{"username":"bob","password":"secret"}'
+$res
+
+# Use the token — bob is a writer for tenant `acme`
+$bobJwt = $res.token
+Invoke-RestMethod -Uri "http://localhost:8081/api/v1/auth/me" `
+                  -Headers @{ Authorization = "Bearer $bobJwt" }
+# → role=reader (LDAP agents default to reader unless they carry an explicit role)
+#   tenants=["acme"], source=LDAP
+```
+
+### Verify the OIDC / WebSSO track
+
+```powershell
+# Mint a Keycloak access token via direct-access grants (mirrors what the WebSSO button
+# would obtain after the redirect dance).
+$kc = Invoke-RestMethod -Method Post `
+    -Uri "http://localhost:8079/realms/valkeyry/protocol/openid-connect/token" `
+    -ContentType "application/x-www-form-urlencoded" `
+    -Body @{ grant_type="password"; client_id="valkeyry-config";
+             username="alice"; password="s3cret" }
+
+# Send it as a bearer — Valkeyry's CompositeReactiveJwtDecoder routes it to
+# the external decoder because the iss claim is http://keycloak:8079/realms/valkeyry.
+$ssoJwt = $kc.access_token
+Invoke-RestMethod -Uri "http://localhost:8081/api/v1/auth/me" `
+                  -Headers @{ Authorization = "Bearer $ssoJwt" }
+# → username=alice, role=writer, tenants=["acme","globex"], source via the OIDC claims.
+```
+
+### What's being proven
+
+- The `CompositeReactiveJwtDecoder` correctly inspects the `iss` claim and dispatches:
+  - `iss=valkeyry-local`  → local HS256 decoder (built-in admin + DB users).
+  - `iss=http://keycloak:8079/realms/valkeyry` → external Nimbus decoder loaded
+    from Keycloak's JWKS.
+- The `JwtTenantAuthoritiesConverter` projects the `valkeyry.role` / `valkeyry.tenants` /
+  `roles` claims into `ROLE_VALKEYRY_WRITER` / `SCOPE_admin` / `SCOPE_tenant:…` authorities
+  used by `SecurityConfig`'s path matchers.
+- The `LdapBasicAuthenticationManager` continues to handle headless agents over HTTP Basic
+  (set `Authorization: Basic …`) for the legacy track-2 pipeline.
+
+The same paths are exercised in CI by `LdapBasicAuthenticationManagerTest` (embedded
+UnboundID directory) and `CompositeReactiveJwtDecoderTest` (in-process RSA key pair acting
+as a fake JWKS) — both pass under `mvn test`.
+
+---
+
 ## 4. UI tour — flexible config types (dropdown / checkbox / multi-choice)
 
 The create-table modal now ships **two editor modes**, selectable in the modal

@@ -1,17 +1,32 @@
-# Valkeyry Config — local dev orchestration
+# Valkeyry Config — local dev orchestration (Postgres + OpenLDAP + Keycloak + the app)
 #
-# Spins up the bare minimum to run ValkeyryConfigApplication:
-#   - Postgres 16 with the right database, user, and schema pre-created
+# Modes:
+#   1) Just Postgres (run the app from your IDE):
+#        docker compose -f docker-compose.dev.yml up -d postgres
 #
-# Then you can either run the app from your IDE (env vars are auto-loaded from .env.dev),
-# or run `docker compose up app` to start the packaged jar.
+#   2) Full hybrid auth stack — Postgres + OpenLDAP + Keycloak + app:
+#        docker compose -f docker-compose.dev.yml --profile hybrid up -d
 #
-# Quick start:
-#   docker compose -f docker-compose.dev.yml up -d postgres
-#   # then in your IDE: Run → ValkeyryConfigApplication
-#   # or, all-in-docker:
-#   mvn -pl valkeyry-config -am -DskipTests package
-#   docker compose -f docker-compose.dev.yml up app
+#   3) Only the directory/IdP sidecars (when you want to keep running the app from IDE
+#      but exercise the LDAP and OIDC tracks):
+#        docker compose -f docker-compose.dev.yml --profile hybrid up -d openldap keycloak postgres
+#        then set VALKEYRY_LDAP_ENABLED=true / VALKEYRY_SSO_ENABLED=true in your IDE run config.
+#
+# Seed data:
+#   - OpenLDAP loads ./db/ldap/bootstrap.ldif on first boot:
+#         uid=bob   / secret    → ou=acme
+#         uid=alice / s3cret    → ou=acme + ou=globex
+#         uid=ops   / opspw     → ou=ops   (writer agent for build pipelines)
+#   - Keycloak imports ./db/keycloak/realm-export.json on first boot:
+#         realm     = valkeyry
+#         client    = valkeyry-config (public, direct-access grants enabled)
+#         user      = alice / s3cret  (role=writer, tenants=[acme, globex])
+#         user      = admin-sso / sso-admin (role=admin)
+#
+# Login flow against the running app at http://localhost:8081/login.html:
+#   • Built-in admin bypass — admin / admin (works even with Postgres/LDAP/SSO off).
+#   • LDAP track — uid=bob / secret → minted JWT carries SCOPE_tenant:acme.
+#   • SSO track  — click "Login with WebSSO" → redirects to Keycloak → returns to /admin.
 
 version: "3.9"
 
@@ -35,27 +50,79 @@ services:
       timeout: 3s
       retries: 20
 
+  # ──────────────── Track 2: LDAP ────────────────
+  # bitnami/openldap is small (≈70 MB) and accepts LDIF via /ldifs on first boot.
+  openldap:
+    image: bitnami/openldap:2.6.8
+    container_name: valkeyry-openldap
+    profiles: ["hybrid"]
+    restart: unless-stopped
+    environment:
+      LDAP_ADMIN_USERNAME:  admin
+      LDAP_ADMIN_PASSWORD:  adminpw
+      LDAP_ROOT:            "dc=valkeyry,dc=io"
+      LDAP_PORT_NUMBER:     "1389"
+      LDAP_SKIP_DEFAULT_TREE: "yes"
+    ports:
+      - "1389:1389"  # ldap://
+    volumes:
+      - ./db/ldap/bootstrap.ldif:/ldifs/bootstrap.ldif:ro
+      - valkeyry_ldap_data:/bitnami/openldap
+
+  # ──────────────── Track 1+: OIDC issuer ────────────────
+  # Keycloak in dev mode auto-creates an H2 in-memory DB; perfect for local sidecars.
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: valkeyry-keycloak
+    profiles: ["hybrid"]
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm", "--http-port=8079"]
+    environment:
+      KEYCLOAK_ADMIN:           admin
+      KEYCLOAK_ADMIN_PASSWORD:  admin
+      KC_HEALTH_ENABLED:        "true"
+      KC_HTTP_RELATIVE_PATH:    "/"
+    ports:
+      - "8079:8079"
+    volumes:
+      - ./db/keycloak:/opt/keycloak/data/import:ro
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: valkeyry-config-app
+    profiles: ["hybrid"]
     depends_on:
       postgres:
         condition: service_healthy
+      openldap:
+        condition: service_started
+      keycloak:
+        condition: service_started
     ports:
       - "8081:8081"
     environment:
-      # R2DBC (runtime, reactive) + JDBC (Flyway bootstrap) point at the postgres service.
       VALKEYRY_CONFIG_R2DBC_URL: "r2dbc:postgresql://postgres:5432/valkeyry_config?schema=valkeyry_config"
       VALKEYRY_CONFIG_JDBC_URL:  "jdbc:postgresql://postgres:5432/valkeyry_config"
       VALKEYRY_CONFIG_DB_USER:   postgres
       VALKEYRY_CONFIG_DB_PASS:   valkeyry
-      # Demo API-key map — single tenant, single key. Production should use OIDC + LDAP.
       VALKEYRY_API_KEYS:         "plugin-test-key:demo-tenant"
-      # Disable upstream OIDC issuer check for local dev (no JWT requests will arrive).
-      VALKEYRY_OIDC_ISSUER:      "http://localhost:8079/default"
+      # Flip the hybrid auth tracks on; the app picks them up via AuthProperties + SecurityConfig.
+      VALKEYRY_SSO_ENABLED:      "true"
+      VALKEYRY_LDAP_ENABLED:     "true"
+      VALKEYRY_ADMIN_USERNAME:   "admin"
+      VALKEYRY_ADMIN_PASSWORD:   "admin"
+      VALKEYRY_JWT_SECRET:       "dev-secret-please-rotate-32b-or-more-please"
+      VALKEYRY_OIDC_ISSUER:      "http://keycloak:8079/realms/valkeyry"
+      VALKEYRY_LDAP_URL:         "ldap://openldap:1389"
+      VALKEYRY_LDAP_BASE:        "dc=valkeyry,dc=io"
+      VALKEYRY_LDAP_USER_DN:     "uid={0},ou=people,dc=valkeyry,dc=io"
+      VALKEYRY_LDAP_TENANT_ATTR: "ou"
+      VALKEYRY_LDAP_MANAGER_DN:  "cn=admin,dc=valkeyry,dc=io"
+      VALKEYRY_LDAP_MANAGER_PW:  "adminpw"
       VALKEYRY_AUDIT_WEBHOOK_ENABLED: "false"
 
 volumes:
   valkeyry_pg_data:
+  valkeyry_ldap_data:

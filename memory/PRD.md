@@ -635,12 +635,21 @@ For the Emergent preview pod (no JVM), the Python mock now mirrors:
 
 ### Testing (iteration_1.json + mvn test)
 - **Backend (FastAPI mock): 14/14 pytest cases passed** (auth flows, admin CRUD, role gating, tools converters).
-- **Java backend (Maven): 22/22 unit tests pass via `mvn test`** on JDK 21 (Temurin 21.0.5) — `mvn -B test` against `/app/valkeyry-config/` produces `BUILD SUCCESS`. Breakdown:
+- **Java backend (Maven): 33/33 unit + integration tests pass via `mvn test`** on JDK 21 (Temurin 21.0.5) — `BUILD SUCCESS` in 13.7s. Breakdown:
+  - `CompositeReactiveJwtDecoderTest`: 7 (issuer-based routing: local HS256, external RS256, SSO-disabled rejection, forged-issuer attack, malformed token, JWKS round-trip, missing-iss safety)
+  - `LdapBasicAuthenticationManagerTest`: 4 (embedded UnboundID directory: single-tenant, multi-tenant, wrong password, unknown user)
   - `SafeBearerTokenAuthenticationConverterTest`: 3 (JWT dot-delimiter guard)
   - `LocalJwtServiceTest`: 2 (HS256 mint with `valkeyry.role/tenants/source` claims)
   - `ToolsControllerTest`: 2 (CSV + DMN converters)
   - `VirtualTableControllerSliceTest`: 6 (regression — still green after security rewrite)
   - `AuditWebhookPublisherTest`: 5, `JsonSchemaValidatorServiceTest`: 2, `PayloadFingerprintTest`: 2
+
+### Hybrid auth live: OpenLDAP + Keycloak sidecars
+- `docker-compose.dev.yml` extended with `openldap` (Bitnami 2.6.8) and `keycloak` (25.0) services under the `hybrid` profile. App service gets `VALKEYRY_SSO_ENABLED=true`, `VALKEYRY_LDAP_ENABLED=true`, `VALKEYRY_OIDC_ISSUER=http://keycloak:8079/realms/valkeyry`, LDAP wiring matching the SDS.
+- `db/ldap/bootstrap.ldif` — seeds `bob/secret` (ou=acme), `alice/s3cret` (acme+globex), `ops/opspw` (ops).
+- `db/keycloak/realm-export.json` — realm `valkeyry`, public client `valkeyry-config`, users `alice/s3cret` (writer, tenants=[acme,globex]) and `admin-sso/sso-admin` (admin). Protocol mappers emit `valkeyry.role` + `valkeyry.tenants` claims.
+- Quickstart: `docker compose -f docker-compose.dev.yml --profile hybrid up -d`.
+- Validation curl flow lives in `WINDOWS_TEST_GUIDE.md` §3.5 and `MAC_TEST_GUIDE.md` §3.5.
 - **Frontend: ~90%** initially. One UI bug found — the logout-btn on `/` was blocked by the
   auto-opening tenant-connect `<dialog>` backdrop. **Fixed** by not auto-opening that modal
   and adding inline `onclick` on the logout button. Verified end-to-end via Playwright:

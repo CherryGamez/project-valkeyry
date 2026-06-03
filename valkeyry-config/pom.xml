@@ -78,6 +78,14 @@
             <artifactId>spring-security-ldap</artifactId>
         </dependency>
 
+        <!-- Embedded UnboundID directory server — only used by LdapLoginIntegrationTest -->
+        <dependency>
+            <groupId>com.unboundid</groupId>
+            <artifactId>unboundid-ldapsdk</artifactId>
+            <version>7.0.1</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Tools / file-conversion track: XLSX, CSV, DMN → JSON -->
         <dependency>
             <groupId>org.apache.poi</groupId>

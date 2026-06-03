@@ -1,0 +1,49 @@
+# Seed LDIF for the Bitnami OpenLDAP sidecar. The image scans /ldifs on first boot
+# and idempotently imports anything in DN order. All three seeded users are members
+# of ou=people; their tenant entitlement is encoded as the `ou` attribute, which the
+# Java LdapBasicAuthenticationManager projects into SCOPE_tenant:<ou> authorities.
+
+dn: ou=people,dc=valkeyry,dc=io
+objectClass: top
+objectClass: organizationalUnit
+ou: people
+
+# Single-tenant writer (used by Maven LdapBasicAuthenticationManagerTest too).
+dn: uid=bob,ou=people,dc=valkeyry,dc=io
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob Writer
+sn: Writer
+mail: bob@valkeyry.io
+ou: acme
+userPassword: secret
+
+# Multi-tenant writer — proves SCOPE_tenant:acme and SCOPE_tenant:globex come through.
+dn: uid=alice,ou=people,dc=valkeyry,dc=io
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Multi-Tenant
+sn: Multi
+mail: alice@valkeyry.io
+ou: acme
+ou: globex
+userPassword: s3cret
+
+# CI/CD agent account — used by docs in the §3.3 LDAP smoke test.
+dn: uid=ops,ou=people,dc=valkeyry,dc=io
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+uid: ops
+cn: Ops Robot
+sn: Robot
+mail: ops@valkeyry.io
+ou: ops
+userPassword: opspw

@@ -1,0 +1,93 @@
+{
+  "realm": "valkeyry",
+  "enabled": true,
+  "displayName": "Valkeyry Config",
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 28800,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "reader", "description": "Read-only registry access" },
+      { "name": "writer", "description": "Can create / update / delete tenant data" },
+      { "name": "admin",  "description": "Tenants + Users CRUD" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "valkeyry-config",
+      "name": "Valkeyry Config HTMX UI",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8081/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": ["+"],
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "valkeyry.role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "false",
+            "user.attribute": "",
+            "claim.name": "valkeyry.role",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "valkeyry.tenants",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenants",
+            "claim.name": "valkeyry.tenants",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@valkeyry.io",
+      "firstName": "Alice",
+      "lastName": "Writer",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "s3cret", "temporary": false }],
+      "realmRoles": ["writer"],
+      "attributes": { "tenants": ["acme", "globex"] }
+    },
+    {
+      "username": "admin-sso",
+      "enabled": true,
+      "email": "admin-sso@valkeyry.io",
+      "firstName": "Admin",
+      "lastName": "SSO",
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "sso-admin", "temporary": false }],
+      "realmRoles": ["admin"],
+      "attributes": { "tenants": ["*"] }
+    }
+  ]
+}
