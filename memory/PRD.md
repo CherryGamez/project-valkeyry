@@ -633,12 +633,25 @@ For the Emergent preview pod (no JVM), the Python mock now mirrors:
 - `/api/v1/admin/{tenants,users}` full CRUD (in-memory).
 - `/api/v1/tools/convert/csv` (csv module), `/dmn` (xml.etree). `xlsx` returns 501.
 
-### Testing (iteration_1.json)
-- **Backend: 14/14 pytest cases passed** (auth flows, admin CRUD, role gating, tools converters).
+### Testing (iteration_1.json + mvn test)
+- **Backend (FastAPI mock): 14/14 pytest cases passed** (auth flows, admin CRUD, role gating, tools converters).
+- **Java backend (Maven): 22/22 unit tests pass via `mvn test`** on JDK 21 (Temurin 21.0.5) — `mvn -B test` against `/app/valkeyry-config/` produces `BUILD SUCCESS`. Breakdown:
+  - `SafeBearerTokenAuthenticationConverterTest`: 3 (JWT dot-delimiter guard)
+  - `LocalJwtServiceTest`: 2 (HS256 mint with `valkeyry.role/tenants/source` claims)
+  - `ToolsControllerTest`: 2 (CSV + DMN converters)
+  - `VirtualTableControllerSliceTest`: 6 (regression — still green after security rewrite)
+  - `AuditWebhookPublisherTest`: 5, `JsonSchemaValidatorServiceTest`: 2, `PayloadFingerprintTest`: 2
 - **Frontend: ~90%** initially. One UI bug found — the logout-btn on `/` was blocked by the
   auto-opening tenant-connect `<dialog>` backdrop. **Fixed** by not auto-opening that modal
   and adding inline `onclick` on the logout button. Verified end-to-end via Playwright:
   `login → admin → / → click logout → /login.html`.
+
+### Tailwind production bundle
+- Replaced `cdn.tailwindcss.com` runtime in `login.html`, `admin.html`, `tools.html`
+  with a pre-built 12 KB minified `assets/tailwind.css` (Tailwind 3.4.17 CLI).
+- Source kept committed at `assets/tailwind.config.cjs` + `assets/tailwind.src.css`;
+  rebuild instructions in `assets/README.md`. No Node toolchain required for the
+  Maven build — the CSS is shipped as a static resource.
 
 ### Credentials
 - Built-in admin: `admin / admin` (env-overrideable). See `/app/memory/test_credentials.md`.
