@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Tools · Valkeyry Config</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/assets/auth.js"></script>
+  <style>
+    html, body {
+      background:
+        radial-gradient(900px 600px at -10% -10%, rgba(0,122,255,0.08), transparent 60%),
+        radial-gradient(800px 500px at 110% -10%, rgba(52,199,89,0.06), transparent 60%),
+        #F2F2F7;
+      color: #1C1C1E; min-height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    }
+    .card { background:#fff; border:1px solid rgba(60,60,67,.12); border-radius:18px; box-shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px rgba(16,24,40,.04); }
+    .btn { display:inline-flex; align-items:center; gap:.4rem; border-radius:10px; padding:.45rem .85rem; font-size:13px; font-weight:600; }
+    .btn-primary { background: linear-gradient(180deg,#1E8BFF,#007AFF); color:#fff; box-shadow:0 4px 12px rgba(0,122,255,.28); }
+    .btn-soft { background:#F2F2F7; color:#1C1C1E; border:1px solid rgba(60,60,67,.12); }
+    .btn-soft:hover { background:#E5E5EA; }
+    .dropzone { border:2px dashed rgba(60,60,67,.24); border-radius:14px; padding:1.5rem; text-align:center; transition: all .15s ease; cursor:pointer; }
+    .dropzone.over { border-color:#007AFF; background: rgba(0,122,255,.04); }
+    pre { background:#0F172A; color:#E2E8F0; border-radius:14px; padding:1rem; font-size:12px; line-height:1.5; overflow:auto; max-height:60vh; }
+    .pill { font-size:11px; font-weight:600; padding:.15rem .55rem; border-radius:999px; background:#E0F2FE; color:#0369A1; display:inline-block; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="sticky top-0 z-10 bg-white/70 backdrop-blur border-b border-gray-200/60">
+    <div class="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
+      <a href="/" class="text-base font-semibold tracking-tight">Valkeyry Config</a>
+      <nav class="flex items-center gap-1">
+        <a href="/" class="btn btn-soft" data-testid="nav-console-link">Console</a>
+        <a href="/admin.html" class="btn btn-soft" data-testid="nav-admin-link" id="nav-admin">Admin</a>
+        <a href="/tools.html" class="btn btn-primary" data-testid="nav-tools-link">Tools</a>
+        <span id="who" class="text-xs text-gray-500 ml-3 mr-2"></span>
+        <button data-testid="logout-btn" id="logout" class="btn btn-soft">Logout</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-6">
+    <section class="card p-6">
+      <h2 class="text-lg font-semibold tracking-tight">File → JSON converter</h2>
+      <p class="text-sm text-gray-500 mt-1">
+        Upload <span class="pill">.xlsx</span> <span class="pill">.csv</span> <span class="pill">.dmn</span> files and convert them
+        to JSON ready for the existing <code class="font-mono">/tables/{name}/entries:batch</code> endpoint.
+      </p>
+
+      <div class="mt-5 grid md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-500 mb-1.5">File type</label>
+          <select id="kind" data-testid="tools-kind" class="border rounded-lg px-3 py-2 text-sm w-full">
+            <option value="xlsx">Excel (.xlsx)</option>
+            <option value="csv">CSV (.csv)</option>
+            <option value="dmn">DMN (.dmn)</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs uppercase tracking-wide text-gray-500 mb-1.5">File</label>
+          <div id="dropzone" data-testid="tools-dropzone" class="dropzone">
+            <input id="file" data-testid="tools-file" type="file" class="hidden"/>
+            <p class="text-sm text-gray-600" id="dz-label">Drop file here or <span class="underline text-blue-600 cursor-pointer">browse</span></p>
+            <p class="text-xs text-gray-400 mt-1" id="dz-name"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end mt-4 gap-2">
+        <button id="reset" data-testid="tools-reset-btn" class="btn btn-soft">Reset</button>
+        <button id="convert" data-testid="tools-convert-btn" class="btn btn-primary">Convert</button>
+      </div>
+    </section>
+
+    <section class="card p-6" id="result-card" style="display:none">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h3 class="text-base font-semibold tracking-tight">Conversion result</h3>
+          <p class="text-xs text-gray-500" id="result-summary"></p>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-soft" id="copy-json" data-testid="tools-copy-btn">Copy JSON</button>
+          <button class="btn btn-soft" id="download-json" data-testid="tools-download-btn">Download .json</button>
+        </div>
+      </div>
+      <pre id="result" data-testid="tools-result"></pre>
+    </section>
+
+    <section class="card p-6 text-sm text-gray-600">
+      <h3 class="text-base font-semibold tracking-tight mb-2 text-gray-900">Output shape</h3>
+      <pre class="text-xs" style="background:#F2F2F7;color:#1C1C1E">{
+  "source": "xlsx" | "csv" | "dmn",
+  "fileName": "&lt;name&gt;",
+  "tables": [{
+    "tableName": "...",
+    "columns":   ["..."],
+    "rows":      [{ "&lt;col&gt;": &lt;value&gt;, ... }]
+  }]
+}</pre>
+      <p class="mt-3">Each <code class="font-mono">tables[].rows[*]</code> object can become the <code class="font-mono">data</code> field of an <code class="font-mono">IngestRecordRequest</code> when you POST to <code class="font-mono">/api/v1/tenants/{tenant}/tables/{name}/entries</code>.</p>
+    </section>
+  </main>
+
+<script>
+if (!vk.requireAuth()) throw new Error('redirecting');
+document.getElementById('who').textContent = vk.username() + ' · ' + vk.role();
+document.getElementById('logout').addEventListener('click', vk.logout);
+if (!vk.isAdmin()) document.getElementById('nav-admin').style.display = 'none';
+
+const fileInput = document.getElementById('file');
+const dropzone = document.getElementById('dropzone');
+const dzName = document.getElementById('dz-name');
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('over');
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    fileInput.files = e.dataTransfer.files;
+    onFile();
+  }
+});
+fileInput.addEventListener('change', onFile);
+function onFile() {
+  const f = fileInput.files && fileInput.files[0];
+  dzName.textContent = f ? (f.name + ' · ' + Math.round(f.size/1024) + ' KB') : '';
+  if (f) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (['xlsx','csv','dmn'].includes(ext)) document.getElementById('kind').value = ext;
+  }
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  fileInput.value = '';
+  dzName.textContent = '';
+  document.getElementById('result-card').style.display = 'none';
+});
+
+document.getElementById('convert').addEventListener('click', async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) { alert('Pick a file first.'); return; }
+  const kind = document.getElementById('kind').value;
+  const fd = new FormData();
+  fd.append('file', f);
+  const t0 = performance.now();
+  const r = await vk.fetch('/api/v1/tools/convert/' + kind, { method: 'POST', body: fd });
+  const ms = Math.round(performance.now() - t0);
+  const card = document.getElementById('result-card');
+  const summary = document.getElementById('result-summary');
+  const result = document.getElementById('result');
+  if (!r.ok) {
+    card.style.display = '';
+    summary.textContent = 'Failed · ' + r.status + ' · ' + ms + ' ms';
+    summary.className = 'text-xs text-red-600';
+    result.textContent = await r.text();
+    return;
+  }
+  const j = await r.json();
+  card.style.display = '';
+  const rowCount = (j.tables||[]).reduce((a,t)=>a+(t.rows||[]).length,0);
+  summary.textContent = `OK · ${j.tables?.length||0} table(s) · ${rowCount} row(s) · ${ms} ms`;
+  summary.className = 'text-xs text-gray-500';
+  result.textContent = JSON.stringify(j, null, 2);
+  result.__data = j;
+});
+
+document.getElementById('copy-json').addEventListener('click', () => {
+  navigator.clipboard.writeText(document.getElementById('result').textContent || '');
+});
+document.getElementById('download-json').addEventListener('click', () => {
+  const blob = new Blob([document.getElementById('result').textContent || ''], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'valkeyry-conversion.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>

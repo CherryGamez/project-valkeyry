@@ -78,6 +78,23 @@
             <artifactId>spring-security-ldap</artifactId>
         </dependency>
 
+        <!-- Tools / file-conversion track: XLSX, CSV, DMN → JSON -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>5.9</version>
+        </dependency>
+        <dependency>
+            <groupId>org.camunda.bpm.dmn</groupId>
+            <artifactId>camunda-engine-dmn</artifactId>
+            <version>7.21.0</version>
+        </dependency>
+
         <!-- JSON Schema validator (Apache 2.0) -->
         <dependency>
             <groupId>com.networknt</groupId>

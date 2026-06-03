@@ -286,6 +286,24 @@ async def access_log(req: Request, call_next):
 def root_index():
     return FileResponse(STATIC_DIR / "index.html")
 
+# Sister pages — explicit routes so the FastAPI mock serves them with the right
+# content-type. The Node proxy on :3000 mirrors these onto the same paths.
+@app.get("/login.html", include_in_schema=False)
+def login_page(): return FileResponse(STATIC_DIR / "login.html")
+
+@app.get("/admin.html", include_in_schema=False)
+def admin_page(): return FileResponse(STATIC_DIR / "admin.html")
+
+@app.get("/tools.html", include_in_schema=False)
+def tools_page(): return FileResponse(STATIC_DIR / "tools.html")
+
+@app.get("/assets/{name:path}", include_in_schema=False)
+def assets(name: str):
+    p = (STATIC_DIR / "assets" / name).resolve()
+    if not str(p).startswith(str(STATIC_DIR / "assets")) or not p.exists():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(p)
+
 # ─────────── Health / info / Swagger / OpenAPI ───────────
 
 @app.get("/actuator/health")
@@ -576,6 +594,295 @@ def preview_info():
         "note": "This is the Python/FastAPI preview backend, not the real Java service.",
         "seededTenants": list(STATE.keys()),
     }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Auth / Admin / Tools — mock parity for the new HTMX login flow
+# (real implementations live in AuthController / AdminController / ToolsController)
+# ═══════════════════════════════════════════════════════════════════════════
+
+import base64
+import io
+import csv
+import xml.etree.ElementTree as ET
+
+ADMIN_USER = "admin"
+ADMIN_PASS = "admin"
+SSO_ENABLED  = False
+LDAP_ENABLED = False
+SSO_AUTH_URL = ""
+
+# In-memory admin store. Pre-seed with admin so /admin.html shows something useful.
+ADMIN_TENANTS: Dict[str, Dict[str, Any]] = {
+    "demo-tenant": {
+        "id": "demo-tenant", "name": "Demo Tenant",
+        "description": "Pre-seeded preview tenant.",
+        "enabled": True, "createdAt": now_iso(), "createdBy": "bootstrap",
+    }
+}
+ADMIN_USERS: Dict[str, Dict[str, Any]] = {
+    "admin": {
+        "id": str(uuid.uuid4()), "username": "admin",
+        "displayName": "Built-in administrator", "email": None,
+        "role": "admin", "source": "LOCAL", "enabled": True,
+        "tenants": ["*"], "createdAt": now_iso(), "createdBy": "bootstrap",
+        # password held outside the view (mock plaintext compare; real impl uses BCrypt)
+        "__password": "admin",
+    }
+}
+
+def _mint_token(payload: Dict[str, Any]) -> str:
+    """Faux HS256 token: real signature replaced by 'mock'. Shape (3 segments) matches a real JWT
+    so the SafeBearerTokenAuthenticationConverter dot-check passes round-trip."""
+    header = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').rstrip(b'=').decode()
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b'=').decode()
+    sig = base64.urlsafe_b64encode(b'mock-signature').rstrip(b'=').decode()
+    return f"{header}.{body}.{sig}"
+
+def _decode_token(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        parts = token.split('.')
+        if len(parts) != 3: return None
+        pad = '=' * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(parts[1] + pad).decode())
+    except Exception:
+        return None
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+@app.get("/api/v1/auth/config")
+def auth_config():
+    return {"ssoEnabled": SSO_ENABLED, "ldapEnabled": LDAP_ENABLED,
+            "ssoAuthUrl": SSO_AUTH_URL or None}
+
+@app.post("/api/v1/auth/login")
+def auth_login(body: LoginBody):
+    # 1) Built-in admin bypass
+    if body.username == ADMIN_USER and body.password == ADMIN_PASS:
+        claims = {"sub": ADMIN_USER, "valkeyry.role": "admin",
+                  "valkeyry.tenants": ["*"], "valkeyry.source": "LOCAL",
+                  "iss": "valkeyry-local", "exp": int(time.time()) + 28800}
+        return {"token": _mint_token(claims), "tokenType": "Bearer", "expiresInSec": 28800,
+                "username": ADMIN_USER, "role": "admin", "tenants": ["*"],
+                "source": "LOCAL", "mode": "admin"}
+    # 2) Local DB user
+    u = ADMIN_USERS.get(body.username)
+    if u and u.get("source") == "LOCAL" and u.get("enabled") and u.get("__password") == body.password:
+        claims = {"sub": u["username"], "valkeyry.role": u["role"],
+                  "valkeyry.tenants": u.get("tenants", []), "valkeyry.source": "LOCAL",
+                  "iss": "valkeyry-local", "exp": int(time.time()) + 28800}
+        return {"token": _mint_token(claims), "tokenType": "Bearer", "expiresInSec": 28800,
+                "username": u["username"], "role": u["role"], "tenants": u.get("tenants", []),
+                "source": "LOCAL", "mode": "admin" if u["role"] == "admin" else "console"}
+    raise HTTPException(status_code=401, detail="Bad credentials")
+
+def _claims_from_header(req: Request) -> Optional[Dict[str, Any]]:
+    h = req.headers.get("authorization", "")
+    if not h.lower().startswith("bearer "): return None
+    return _decode_token(h[7:].strip())
+
+@app.get("/api/v1/auth/me")
+def auth_me(req: Request):
+    c = _claims_from_header(req)
+    if not c: raise HTTPException(status_code=401)
+    role = c.get("valkeyry.role", "reader")
+    return {"username": c.get("sub", "?"), "role": role,
+            "tenants": c.get("valkeyry.tenants", []),
+            "source": c.get("valkeyry.source", "LOCAL"),
+            "isWriter": role in ("writer", "admin"),
+            "isAdmin": role == "admin"}
+
+@app.post("/api/v1/auth/logout", status_code=204)
+def auth_logout(): return Response(status_code=204)
+
+def _require_admin(req: Request):
+    c = _claims_from_header(req)
+    if not c or c.get("valkeyry.role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return c
+
+# ───── Tenants CRUD ─────
+
+class TenantBody(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    enabled: Optional[bool] = True
+
+@app.get("/api/v1/admin/tenants")
+def admin_list_tenants(req: Request):
+    _require_admin(req)
+    return list(ADMIN_TENANTS.values())
+
+@app.post("/api/v1/admin/tenants", status_code=201)
+def admin_create_tenant(body: TenantBody, req: Request):
+    c = _require_admin(req)
+    if body.id in ADMIN_TENANTS:
+        raise HTTPException(status_code=409, detail="Tenant id already exists")
+    t = {"id": body.id, "name": body.name, "description": body.description,
+         "enabled": body.enabled if body.enabled is not None else True,
+         "createdAt": now_iso(), "createdBy": c.get("sub", "?")}
+    ADMIN_TENANTS[body.id] = t
+    return t
+
+@app.put("/api/v1/admin/tenants/{tid}")
+def admin_update_tenant(tid: str, body: TenantBody, req: Request):
+    _require_admin(req)
+    if tid not in ADMIN_TENANTS: raise HTTPException(status_code=404, detail="No such tenant")
+    if body.id != tid: raise HTTPException(status_code=400, detail="Path id must match body id")
+    t = ADMIN_TENANTS[tid]
+    t["name"] = body.name
+    t["description"] = body.description
+    if body.enabled is not None: t["enabled"] = body.enabled
+    return t
+
+@app.delete("/api/v1/admin/tenants/{tid}", status_code=204)
+def admin_delete_tenant(tid: str, req: Request):
+    _require_admin(req)
+    ADMIN_TENANTS.pop(tid, None)
+    return Response(status_code=204)
+
+# ───── Users CRUD ─────
+
+class UserBody(BaseModel):
+    username: str
+    displayName: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = "reader"
+    source: Optional[str] = "LOCAL"
+    password: Optional[str] = None
+    enabled: Optional[bool] = True
+    tenants: Optional[List[str]] = None
+
+@app.get("/api/v1/admin/users")
+def admin_list_users(req: Request):
+    _require_admin(req)
+    return [{k: v for k, v in u.items() if not k.startswith("__")} for u in ADMIN_USERS.values()]
+
+@app.post("/api/v1/admin/users", status_code=201)
+def admin_create_user(body: UserBody, req: Request):
+    c = _require_admin(req)
+    if body.username in ADMIN_USERS:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    src = (body.source or "LOCAL").upper()
+    if src == "LOCAL" and not body.password:
+        raise HTTPException(status_code=400, detail="Password required for LOCAL users")
+    u = {
+        "id": str(uuid.uuid4()), "username": body.username,
+        "displayName": body.displayName, "email": body.email,
+        "role": body.role or "reader", "source": src,
+        "enabled": body.enabled if body.enabled is not None else True,
+        "tenants": body.tenants or [],
+        "createdAt": now_iso(), "createdBy": c.get("sub", "?"),
+        "__password": body.password if src == "LOCAL" else None,
+    }
+    ADMIN_USERS[body.username] = u
+    return {k: v for k, v in u.items() if not k.startswith("__")}
+
+@app.put("/api/v1/admin/users/{uid}")
+def admin_update_user(uid: str, body: UserBody, req: Request):
+    _require_admin(req)
+    u = next((v for v in ADMIN_USERS.values() if v["id"] == uid), None)
+    if u is None: raise HTTPException(status_code=404, detail="No such user")
+    u["displayName"] = body.displayName
+    u["email"] = body.email
+    if body.role: u["role"] = body.role
+    if body.source: u["source"] = body.source.upper()
+    if body.enabled is not None: u["enabled"] = body.enabled
+    if body.password: u["__password"] = body.password
+    if body.tenants is not None: u["tenants"] = body.tenants
+    return {k: v for k, v in u.items() if not k.startswith("__")}
+
+@app.delete("/api/v1/admin/users/{uid}", status_code=204)
+def admin_delete_user(uid: str, req: Request):
+    _require_admin(req)
+    victim = next((k for k, v in ADMIN_USERS.items() if v["id"] == uid), None)
+    if victim and victim != ADMIN_USER:  # don't let the UI nuke the bypass admin
+        ADMIN_USERS.pop(victim)
+    return Response(status_code=204)
+
+# ───── Tools converters ─────
+
+def _require_auth(req: Request):
+    c = _claims_from_header(req)
+    if not c: raise HTTPException(status_code=401)
+    return c
+
+from fastapi import UploadFile, File
+
+@app.post("/api/v1/tools/convert/csv")
+async def tools_convert_csv(req: Request, file: UploadFile = File(...)):
+    _require_auth(req)
+    raw = (await file.read()).decode("utf-8", errors="replace")
+    reader = csv.reader(io.StringIO(raw))
+    rows_iter = list(reader)
+    if not rows_iter:
+        return {"source": "csv", "fileName": file.filename, "tables": []}
+    header = [h.strip() or f"col_{i+1}" for i, h in enumerate(rows_iter[0])]
+    rows = []
+    for line in rows_iter[1:]:
+        row = {}
+        for i, col in enumerate(header):
+            v = line[i] if i < len(line) else None
+            row[col] = None if (v is None or v == "") else v
+        rows.append(row)
+    name = (file.filename or "table").rsplit(".", 1)[0]
+    return {"source": "csv", "fileName": file.filename,
+            "tables": [{"tableName": name, "columns": header, "rows": rows}]}
+
+@app.post("/api/v1/tools/convert/xlsx")
+async def tools_convert_xlsx(req: Request, file: UploadFile = File(...)):
+    _require_auth(req)
+    # Mock-grade XLSX: we don't carry openpyxl/POI in the preview pod, so we just
+    # surface a 501 explaining how to test against the real Java backend.
+    raise HTTPException(status_code=501,
+        detail="XLSX conversion is implemented in the Java ToolsController; the Python mock "
+               "only proxies CSV and DMN. Run the Java backend to exercise XLSX.")
+
+@app.post("/api/v1/tools/convert/dmn")
+async def tools_convert_dmn(req: Request, file: UploadFile = File(...)):
+    _require_auth(req)
+    raw = await file.read()
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse DMN: {e}")
+    ns = {"dmn": "https://www.omg.org/spec/DMN/20191111/MODEL/"}
+    # Fall back to no-namespace if not OMG namespace
+    decisions = root.findall(".//dmn:decision", ns)
+    if not decisions: decisions = root.findall(".//decision")
+    tables = []
+    for d in decisions:
+        for dt in d.findall(".//dmn:decisionTable", ns) or d.findall(".//decisionTable"):
+            input_names: List[str] = []
+            for inp in dt.findall("dmn:input", ns) or dt.findall("input"):
+                label = inp.get("label") or inp.get("id")
+                input_names.append(label)
+            output_names: List[str] = []
+            for outp in dt.findall("dmn:output", ns) or dt.findall("output"):
+                label = outp.get("label") or outp.get("name") or outp.get("id")
+                output_names.append(label)
+            cols = [f"in:{n}" for n in input_names] + [f"out:{n}" for n in output_names]
+            rows = []
+            for rule in dt.findall("dmn:rule", ns) or dt.findall("rule"):
+                row: Dict[str, Any] = {"_ruleId": rule.get("id")}
+                ies = rule.findall("dmn:inputEntry", ns) or rule.findall("inputEntry")
+                for i, ie in enumerate(ies):
+                    if i < len(input_names):
+                        txt = "".join(t.text or "" for t in (ie.findall("dmn:text", ns) or ie.findall("text"))).strip()
+                        row[f"in:{input_names[i]}"] = txt
+                oes = rule.findall("dmn:outputEntry", ns) or rule.findall("outputEntry")
+                for i, oe in enumerate(oes):
+                    if i < len(output_names):
+                        txt = "".join(t.text or "" for t in (oe.findall("dmn:text", ns) or oe.findall("text"))).strip()
+                        row[f"out:{output_names[i]}"] = txt
+                rows.append(row)
+            tables.append({"tableName": d.get("name") or d.get("id"),
+                           "decisionId": d.get("id"),
+                           "hitPolicy": dt.get("hitPolicy", "UNIQUE"),
+                           "columns": cols, "rows": rows})
+    return {"source": "dmn", "fileName": file.filename, "tables": tables}
 
 # ─────────── Init ───────────
 

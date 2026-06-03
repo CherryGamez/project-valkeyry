@@ -35,6 +35,11 @@ public class JwtTenantAuthoritiesConverter implements Converter<Jwt, Mono<Abstra
         if (hasWriterRole(jwt)) {
             authorities.add(new SimpleGrantedAuthority("ROLE_VALKEYRY_WRITER"));
         }
+        if (hasAdminRole(jwt)) {
+            authorities.add(new SimpleGrantedAuthority("SCOPE_admin"));
+            // Admin implies writer.
+            authorities.add(new SimpleGrantedAuthority("ROLE_VALKEYRY_WRITER"));
+        }
         return Mono.just(new JwtAuthenticationToken(jwt, authorities, jwt.getSubject()));
     }
 
@@ -51,6 +56,16 @@ public class JwtTenantAuthoritiesConverter implements Converter<Jwt, Mono<Abstra
             return out;
         }
         return Set.of();
+    }
+
+    private static boolean hasAdminRole(Jwt jwt) {
+        Object role = jwt.getClaim("valkeyry.role");
+        if (role instanceof String s && "admin".equalsIgnoreCase(s)) return true;
+        Object roles = jwt.getClaim("roles");
+        if (roles instanceof List<?> list) {
+            for (Object o : list) if ("admin".equalsIgnoreCase(String.valueOf(o))) return true;
+        }
+        return false;
     }
 
     private static boolean hasWriterRole(Jwt jwt) {

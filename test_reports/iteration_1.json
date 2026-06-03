@@ -1,0 +1,45 @@
+{
+  "summary": "Tested Valkeyry-Config auth/admin/tools flow against the FastAPI mock at preview URL. Backend: 14/14 pytest cases passed covering /api/v1/auth/{config,login,me,logout}, full /api/v1/admin/tenants CRUD, /api/v1/admin/users + writer-role gating (bob 403 on admin), /api/v1/tools/convert/{csv,xlsx=501,dmn}, static page assets. Frontend: login (admin/admin), redirect-to-admin, tenants/users tables, add-tenant (qa) and add-user (alice_test) UI flows, /tools.html CSV conversion (returned JSON tables with rows), unauthenticated / → /login.html gate, top-bar nav-admin-link/nav-tools-link/logout-btn visible for admin, bad-credentials error 'Bad credentials' surfaced. One UI bug found: the logout-btn on /index does not fire vk.logout().",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "index.html top-bar / logout-btn",
+        "issue": "Clicking the logout button on / (index) does NOT clear vk.auth.v1 from localStorage and does NOT navigate to /login.html. Confirmed: pre-logout vk.auth.v1 length=381, post-logout still present; URL stays on /. The tenant 'Connect to a tenant' modal opens on first index load and its backdrop appears to be intercepting clicks (Playwright clicked with force=true and HTMX nav-admin-link/nav-tools-link work, but logout-btn fires nothing). Either the click handler is not bound (e.g. bound before bootApp() injects the top-bar) or z-index on the modal backdrop is above the top-bar. Direct test via console: clicking [data-testid=logout-btn] does not redirect. Calling vk.logout() in DevTools works correctly (clears storage + redirects), so the wiring is the gap.",
+        "selector": "[data-testid=\"logout-btn\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "all static pages", "issues": ["cdn.tailwindcss.com used at runtime; Tailwind itself warns 'should not be used in production'. Fine for the preview but flag for the Java build."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_admin_tools.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix logout-btn wiring on index.html: ensure the click binding survives bootApp()/HTMX swaps and is not occluded by the 'Connect to a tenant' modal backdrop (close modal first or raise the top-bar z-index above the modal). Recommend onclick=\"vk.logout()\" inline or delegate via document.addEventListener('click', e => e.target.closest('[data-testid=logout-btn]') && vk.logout()).",
+    "Cosmetic: switch from cdn.tailwindcss.com to a built CSS bundle for the Spring static resources (Tailwind itself warns)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 891 lines but is an intentionally cohesive mock with extensive seed/validation/CRUD; splitting is optional. No MongoDB _id leaks (in-memory).",
+    "JWT 'mock' is opaque: signature is the literal string b64('mock-signature'). For the preview that's fine since SafeBearerTokenAuthenticationConverter only checks the 3-segment shape, but be aware the mock will accept ANY string with 2 dots as a valid token after b64 decode. Acceptable for preview, but documented.",
+    "_require_auth/_require_admin are stub guards — they do not verify token expiry (`exp` claim) or signature. Confirm the Java SafeBearerTokenAuthenticationConverter is the source of truth in prod.",
+    "ADMIN_USERS / ADMIN_TENANTS are module-level in-memory dicts — state is lost on backend restart (already called out in mocked_api note).",
+    "tools_convert_csv decodes with errors='replace' which silently masks encoding bugs; acceptable for preview.",
+    "ToolsController DMN parser is XML-only; safe given ET parses untrusted XML — consider defusedxml in the Java side for production."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_admin_tools.py (created)",
+    "/app/test_reports/iteration_1.json (created)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "~90% (logout-btn click no-op)"},
+  "test_credentials": "admin/admin (admin); created bob/p@ssw0rd writer in /api/v1/admin/users tied to tenant 'acme'",
+  "seed_data_creation": "Created TEST tenants 'acme', 'qa' and user 'alice_test' via the UI flow. All persist only in the FastAPI process memory; restart clears them.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend mock at /app/backend/server.py is fully green. Re-test only the logout-btn flow after main agent fixes index.html wiring. JWT 'Missing dot delimiter(s)' bug fix is covered structurally: /api/v1/auth/login returns tokens with exactly 2 dots and 3 non-empty base64url segments (test_auth_login_admin_ok asserts this). The Java SafeBearerTokenAuthenticationConverterTest cannot be executed here (no JVM in pod) — covered by code review only.",
+  "rca_of_the_issue": "Logout regression — RCA: After admin login + visit /, bootApp() in index.html opens the 'Connect to a tenant' modal automatically (no tenant context configured yet). The modal backdrop seems to be on the same/higher z-index as the top-bar, so logout-btn click events do not reach the handler (or the handler is bound to a stale node that bootApp() replaced). Reproduction: 1) login admin/admin → admin.html. 2) navigate to /. 3) see modal. 4) click logout-btn (top-right). Observe: vk.auth.v1 in localStorage unchanged, URL still /. Mitigation: close/dismiss modal automatically when clicking logout, OR bind via document-level delegated listener, OR add inline onclick=\"event.preventDefault(); vk.logout()\" to the logout button markup."
+}

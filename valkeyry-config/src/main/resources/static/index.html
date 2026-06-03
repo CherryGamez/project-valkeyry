@@ -9,6 +9,9 @@
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/mustache@4.2.0/mustache.min.js"></script>
 
+    <!-- Shared JWT/auth helpers (login.html, admin.html, tools.html, index.html) -->
+    <script src="/assets/auth.js"></script>
+
     <!-- Tailwind CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -292,6 +295,16 @@
                     class="btn-primary press text-[13px] px-4 py-1.5">
                 Connect
             </button>
+        </div>
+
+        <!-- Login session controls (Admin / Tools / Logout) -->
+        <div class="flex items-center gap-1.5">
+            <a href="/admin.html" id="nav-admin-link" data-testid="nav-admin-link"
+               class="btn-ghost press text-[13px] px-3 py-1.5 hidden">Admin</a>
+            <a href="/tools.html" data-testid="nav-tools-link"
+               class="btn-ghost press text-[13px] px-3 py-1.5">Tools</a>
+            <span id="who-label" data-testid="who-label" class="text-[11px] text-ink-500 font-mono"></span>
+            <button id="logout-btn" data-testid="logout-btn" class="btn-ghost press text-[13px] px-3 py-1.5">Logout</button>
         </div>
     </div>
 
@@ -728,11 +741,16 @@ function hasConn() {
 
 // ============== HTMX global request configuration ==============
 // Auth headers + dynamic URL templating for hx-get/hx-post with `[tenantId]` placeholders.
+// Two layers — the per-tenant credentials (Connect modal) take priority for backend API
+// calls that need a tenant-scoped key; otherwise we fall back to the login JWT minted by
+// the /api/v1/auth/login flow (vk.token() comes from /assets/auth.js).
 document.body.addEventListener('htmx:configRequest', (evt) => {
     const c = getConn();
     if (c.token) {
         if (c.mode === 'bearer') evt.detail.headers['Authorization'] = 'Bearer ' + c.token;
         else                     evt.detail.headers['X-API-Key']      = c.token;
+    } else if (window.vk && vk.token && vk.token()) {
+        evt.detail.headers['Authorization'] = 'Bearer ' + vk.token();
     }
     evt.detail.headers['Accept'] = 'application/json';
 });
@@ -3283,6 +3301,17 @@ function toast(message, isError = false) {
 
 // ============== Boot ==============
 function bootApp() {
+    // Login gate: anyone hitting / without a JWT goes to the login page.
+    if (!window.vk || !vk.requireAuth || !vk.requireAuth()) return;
+
+    // Surface session controls (Logout, optional Admin link, current user).
+    const whoLabel  = document.getElementById('who-label');
+    const adminLink = document.getElementById('nav-admin-link');
+    const logoutBtn = document.getElementById('logout-btn');
+    if (whoLabel)  whoLabel.textContent  = vk.username() + ' · ' + vk.role();
+    if (adminLink && vk.isAdmin()) adminLink.classList.remove('hidden');
+    if (logoutBtn) logoutBtn.addEventListener('click', vk.logout);
+
     const c = getConn();
     document.getElementById('auth-tenant').value = c.tenantId;
     document.getElementById('auth-mode').value   = c.mode;

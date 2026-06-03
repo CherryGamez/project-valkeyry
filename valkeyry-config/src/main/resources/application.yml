@@ -50,16 +50,31 @@ spring:
       hibernate:
         default_schema: valkeyry_config
   # ----- OIDC resource server (Track 1) -----
+  # Only set when SSO is actually wired (VALKEYRY_SSO_ENABLED=true). When blank,
+  # Spring's resource-server autoconfig stays dormant and we rely on the
+  # CompositeReactiveJwtDecoder bean (HS256 local + optional external) declared
+  # in AuthBootstrapConfig.
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${VALKEYRY_OIDC_ISSUER:http://localhost:8079/default}
+          issuer-uri: ${VALKEYRY_OIDC_ISSUER:}
   codec:
     max-in-memory-size: 8MB
 
 # ---------- App-specific ----------
 valkeyry:
+  # Form-login + hybrid auth toggles. SSO/LDAP off by default for local dev so the
+  # built-in admin (admin/admin) is the only working credential out of the box.
+  auth:
+    sso-enabled:    ${VALKEYRY_SSO_ENABLED:false}
+    ldap-enabled:   ${VALKEYRY_LDAP_ENABLED:false}
+    admin-username: ${VALKEYRY_ADMIN_USERNAME:admin}
+    admin-password: ${VALKEYRY_ADMIN_PASSWORD:admin}
+    # ≥ 32 bytes. Dev default is fine for local runs; override in any real deploy.
+    jwt-secret:     ${VALKEYRY_JWT_SECRET:valkeyry-dev-secret-please-override-in-production-32b!!}
+    jwt-issuer:     ${VALKEYRY_JWT_ISSUER:valkeyry-local}
+    jwt-ttl-seconds: ${VALKEYRY_JWT_TTL_SECONDS:28800}
   ldap:
     url: ${VALKEYRY_LDAP_URL:ldap://localhost:1389}
     base-dn: ${VALKEYRY_LDAP_BASE:dc=valkeyry,dc=io}

@@ -128,6 +128,7 @@ response *inline* on that page.
 | API-key     | `X-API-Key: <key>`                           | Key → tenant from `VALKEYRY_API_KEYS` |
 | LDAP Basic  | `Authorization: Basic base64(user:pass)`     | Tenant from user's `ou` attribute |
 | OIDC JWT    | `Authorization: Bearer <jwt>`                | Tenant from `tenants` claim       |
+| **Local form-login** | `Authorization: Bearer <hs256-jwt>` | Tenant list comes from `app_user_tenant` |
 
 ### 3.3 Push a schema with the bundled API key
 
@@ -162,6 +163,76 @@ curl -X POST "$API/tables/customers/entries" \
 
 In the UI, pick `demo-tenant` from the sidebar, click `customers`, and the
 row appears.
+
+---
+
+## 3.4 Form-login + Admin panel + Tools tab (2026-02 update)
+
+Starting with the **2026-02-15** release the registry exposes a full
+sign-in flow with three new endpoints (powered by `AuthController` /
+`AdminController` / `ToolsController`):
+
+| URL                          | Purpose                                         |
+|------------------------------|-------------------------------------------------|
+| `/login.html`                | WebSSO *and* username/password form             |
+| `/admin.html`                | Tenants + users CRUD (Camunda-Identity style)   |
+| `/tools.html`                | XLSX / CSV / DMN → JSON converter               |
+
+### Built-in admin (works without LDAP/SSO)
+
+The container ships with **`admin` / `admin`** as the bypass credential.
+Override via env vars before starting `docker compose`:
+
+```bash
+export VALKEYRY_ADMIN_USERNAME=admin
+export VALKEYRY_ADMIN_PASSWORD=change-me-please
+export VALKEYRY_JWT_SECRET="a-32-byte-or-longer-random-string!!!"
+```
+
+Then sign in at `http://localhost:8081/login.html`:
+
+1. Type `admin` / `admin` → press *Login (username/pwd)*
+2. You're redirected to `/admin.html` because the user has the `admin` role.
+3. Create a tenant (e.g. `acme`) and a writer user under that tenant.
+
+### Toggling SSO and LDAP
+
+Both auth tracks are now **independent env-var flags** so dev runs don't
+fail when those sidecars are off:
+
+```bash
+export VALKEYRY_SSO_ENABLED=false      # default off
+export VALKEYRY_LDAP_ENABLED=false     # default off
+# When SSO is on, also set:
+export VALKEYRY_OIDC_ISSUER=http://localhost:8079/default
+```
+
+### Tools tab — bulk import via XLSX/CSV/DMN
+
+1. Open `http://localhost:8081/tools.html`.
+2. Drop a `.xlsx`, `.csv`, or `.dmn` file in the dropzone.
+3. Hit **Convert** — the server returns a JSON shape (one entry in
+   `tables[]` per worksheet / DMN decision table):
+
+   ```json
+   {
+     "source":   "xlsx",
+     "fileName": "customers.xlsx",
+     "tables":   [{ "tableName": "Sheet1", "columns": [...], "rows": [...] }]
+   }
+   ```
+
+4. Each `tables[].rows[*]` object is already the `data` payload of
+   `POST /api/v1/tenants/{tenant}/tables/{table}/entries:batch`.
+
+### JWT "Missing dot delimiter(s)" — fixed
+
+A `SafeBearerTokenAuthenticationConverter` now sits in front of the OIDC
+pipeline, so passing a non-JWT bearer (an old API key in the `Authorization`
+header, for instance) no longer triggers
+`InvalidBearerTokenException: Missing dot delimiter(s)` — the request just
+falls through to the API-key / LDAP filters and either succeeds or returns
+a clean 401.
 
 ---
 

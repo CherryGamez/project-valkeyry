@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Admin · Valkeyry Config</title>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/assets/auth.js"></script>
+  <style>
+    html, body {
+      background:
+        radial-gradient(900px 600px at -10% -10%, rgba(0,122,255,0.10), transparent 60%),
+        radial-gradient(800px 500px at 110% -10%, rgba(255,45,85,0.07),  transparent 60%),
+        #F2F2F7;
+      color: #1C1C1E; min-height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    }
+    .card { background:#fff; border:1px solid rgba(60,60,67,.12); border-radius:18px; box-shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px rgba(16,24,40,.04); }
+    .btn { display:inline-flex; align-items:center; gap:.4rem; border-radius:10px; padding:.45rem .85rem; font-size:13px; font-weight:600; }
+    .btn-primary { background: linear-gradient(180deg,#1E8BFF,#007AFF); color:#fff; box-shadow:0 4px 12px rgba(0,122,255,.28); }
+    .btn-primary:hover { filter:brightness(1.05); }
+    .btn-soft { background:#F2F2F7; color:#1C1C1E; border:1px solid rgba(60,60,67,.12); }
+    .btn-soft:hover { background:#E5E5EA; }
+    .btn-danger { background:#FFEBEC; color:#B42318; border:1px solid #FECDCA; }
+    .btn-danger:hover { background:#FEE4E2; }
+    .field { border:1px solid rgba(60,60,67,.18); border-radius:10px; padding:.5rem .7rem; background:#fff; width:100%; font-size:13px; }
+    .field:focus { outline:none; box-shadow:0 0 0 3px rgba(0,122,255,.22); border-color:#007AFF; }
+    th { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#8E8E93; text-align:left; font-weight:600; padding:.6rem .75rem; border-bottom:1px solid rgba(60,60,67,.1); }
+    td { font-size:13.5px; padding:.7rem .75rem; border-bottom:1px solid rgba(60,60,67,.06); vertical-align:middle; }
+    tr:hover td { background:#F9F9FB; }
+    .badge { font-size:11px; font-weight:600; padding:.15rem .55rem; border-radius:999px; display:inline-block; }
+    .badge-admin  { background:#FFEBEC; color:#B42318; }
+    .badge-writer { background:#FEF3C7; color:#92400E; }
+    .badge-reader { background:#E0F2FE; color:#0369A1; }
+    .badge-local  { background:#E5E7EB; color:#374151; }
+    .badge-ldap   { background:#F3E8FF; color:#6B21A8; }
+    .badge-sso    { background:#D1FAE5; color:#065F46; }
+    dialog { border:none; border-radius:18px; padding:0; max-width:480px; width:100%; box-shadow:0 24px 60px rgba(0,0,0,.18); }
+    dialog::backdrop { background:rgba(0,0,0,.32); backdrop-filter: blur(2px); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="sticky top-0 z-10 bg-white/70 backdrop-blur border-b border-gray-200/60">
+    <div class="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
+      <div class="flex items-center gap-3">
+        <a href="/" class="text-base font-semibold tracking-tight">Valkeyry Config</a>
+        <span class="badge badge-admin">ADMIN</span>
+      </div>
+      <nav class="flex items-center gap-1">
+        <a href="/" class="btn btn-soft" data-testid="nav-console-link">Console</a>
+        <a href="/admin.html" class="btn btn-primary" data-testid="nav-admin-link">Admin</a>
+        <a href="/tools.html" class="btn btn-soft" data-testid="nav-tools-link">Tools</a>
+        <span id="who" class="text-xs text-gray-500 ml-3 mr-2"></span>
+        <button data-testid="logout-btn" id="logout" class="btn btn-soft">Logout</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
+    <!-- TENANTS -->
+    <section class="card">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div>
+          <h2 class="text-lg font-semibold tracking-tight">Tenants</h2>
+          <p class="text-xs text-gray-500">Admin-managed tenants — these slugs are the same identifier used everywhere else in the registry.</p>
+        </div>
+        <button data-testid="add-tenant-btn" class="btn btn-primary" onclick="openTenantDialog()">+ Add tenant</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead><tr>
+            <th>ID</th><th>Name</th><th>Description</th><th>Status</th><th>Created</th><th class="text-right pr-5">Actions</th>
+          </tr></thead>
+          <tbody id="tenants-body" data-testid="tenants-table-body"><tr><td colspan="6" class="text-center py-8 text-gray-400">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- USERS -->
+    <section class="card">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div>
+          <h2 class="text-lg font-semibold tracking-tight">Users</h2>
+          <p class="text-xs text-gray-500">Local users have BCrypt passwords. LDAP/SSO rows are mirrors that exist purely to attach tenant entitlements.</p>
+        </div>
+        <button data-testid="add-user-btn" class="btn btn-primary" onclick="openUserDialog()">+ Add user</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead><tr>
+            <th>Username</th><th>Display</th><th>Email</th><th>Role</th><th>Source</th><th>Tenants</th><th>Status</th><th class="text-right pr-5">Actions</th>
+          </tr></thead>
+          <tbody id="users-body" data-testid="users-table-body"><tr><td colspan="8" class="text-center py-8 text-gray-400">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Tenant dialog -->
+  <dialog id="tenant-dialog" data-testid="tenant-dialog">
+    <form id="tenant-form" method="dialog" class="p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold" id="tenant-dialog-title">New tenant</h3>
+        <button type="button" class="text-gray-400 hover:text-gray-700" onclick="document.getElementById('tenant-dialog').close()">×</button>
+      </div>
+      <input type="hidden" id="t-original-id"/>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">ID (slug)</span>
+        <input id="t-id" data-testid="tenant-id" class="field" required pattern="[a-zA-Z0-9_\-]{1,128}"/>
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Name</span>
+        <input id="t-name" data-testid="tenant-name" class="field" required/>
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Description</span>
+        <textarea id="t-desc" data-testid="tenant-desc" class="field" rows="3"></textarea>
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input id="t-enabled" data-testid="tenant-enabled" type="checkbox" checked/> Enabled
+      </label>
+      <div id="t-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" class="btn btn-soft" onclick="document.getElementById('tenant-dialog').close()">Cancel</button>
+        <button type="submit" data-testid="tenant-save-btn" class="btn btn-primary">Save tenant</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- User dialog -->
+  <dialog id="user-dialog" data-testid="user-dialog">
+    <form id="user-form" method="dialog" class="p-6 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold" id="user-dialog-title">New user</h3>
+        <button type="button" class="text-gray-400 hover:text-gray-700" onclick="document.getElementById('user-dialog').close()">×</button>
+      </div>
+      <input type="hidden" id="u-id"/>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Username</span>
+          <input id="u-username" data-testid="user-username" class="field" required/>
+        </label>
+        <label class="block">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Display name</span>
+          <input id="u-display" data-testid="user-display" class="field"/>
+        </label>
+        <label class="block col-span-2">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Email</span>
+          <input id="u-email" data-testid="user-email" type="email" class="field"/>
+        </label>
+        <label class="block">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Role</span>
+          <select id="u-role" data-testid="user-role" class="field">
+            <option value="reader">reader</option>
+            <option value="writer">writer</option>
+            <option value="admin">admin</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Source</span>
+          <select id="u-source" data-testid="user-source" class="field" onchange="onSourceChange()">
+            <option value="LOCAL">LOCAL</option>
+            <option value="LDAP">LDAP</option>
+            <option value="SSO">SSO</option>
+          </select>
+        </label>
+        <label class="block col-span-2" id="u-password-wrap">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">
+            Password <span id="u-password-hint" class="text-gray-400 normal-case">(leave blank to keep existing)</span>
+          </span>
+          <input id="u-password" data-testid="user-password" type="password" class="field"/>
+        </label>
+        <label class="block col-span-2">
+          <span class="block text-xs uppercase tracking-wide text-gray-500 mb-1">Tenants (comma-separated slugs, * for all)</span>
+          <input id="u-tenants" data-testid="user-tenants" class="field" placeholder="demo-tenant, acme"/>
+        </label>
+        <label class="flex items-center gap-2 text-sm col-span-2">
+          <input id="u-enabled" data-testid="user-enabled" type="checkbox" checked/> Enabled
+        </label>
+      </div>
+      <div id="u-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" class="btn btn-soft" onclick="document.getElementById('user-dialog').close()">Cancel</button>
+        <button type="submit" data-testid="user-save-btn" class="btn btn-primary">Save user</button>
+      </div>
+    </form>
+  </dialog>
+
+<script>
+if (!vk.requireAuth({ role: 'admin' })) throw new Error('redirecting');
+
+document.getElementById('who').textContent = vk.username() + ' · ' + vk.role();
+document.getElementById('logout').addEventListener('click', vk.logout);
+
+// ----------------- Tenants -----------------
+async function loadTenants() {
+  const r = await vk.fetch('/api/v1/admin/tenants');
+  const rows = r.ok ? await r.json() : [];
+  const body = document.getElementById('tenants-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-gray-400">No tenants yet — click <strong>Add tenant</strong> to get started.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(t => `
+    <tr data-testid="tenant-row-${t.id}">
+      <td class="font-mono text-xs">${esc(t.id)}</td>
+      <td>${esc(t.name)}</td>
+      <td class="text-gray-500">${esc(t.description||'')}</td>
+      <td>${t.enabled ? '<span class="badge badge-sso">enabled</span>' : '<span class="badge badge-local">disabled</span>'}</td>
+      <td class="text-xs text-gray-500">${esc(t.createdAt||'')}<br/><span class="text-gray-400">by ${esc(t.createdBy||'')}</span></td>
+      <td class="text-right pr-5 whitespace-nowrap">
+        <button class="btn btn-soft" data-testid="tenant-edit-${t.id}" onclick='editTenant(${JSON.stringify(t).replace(/\'/g,"&#39;")})'>Edit</button>
+        <button class="btn btn-danger" data-testid="tenant-delete-${t.id}" onclick="deleteTenant('${esc(t.id)}')">Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+function openTenantDialog() {
+  document.getElementById('tenant-dialog-title').textContent = 'New tenant';
+  document.getElementById('t-original-id').value = '';
+  document.getElementById('t-id').value = '';
+  document.getElementById('t-id').disabled = false;
+  document.getElementById('t-name').value = '';
+  document.getElementById('t-desc').value = '';
+  document.getElementById('t-enabled').checked = true;
+  document.getElementById('t-error').classList.add('hidden');
+  document.getElementById('tenant-dialog').showModal();
+}
+function editTenant(t) {
+  document.getElementById('tenant-dialog-title').textContent = 'Edit tenant';
+  document.getElementById('t-original-id').value = t.id;
+  document.getElementById('t-id').value = t.id;
+  document.getElementById('t-id').disabled = true;
+  document.getElementById('t-name').value = t.name || '';
+  document.getElementById('t-desc').value = t.description || '';
+  document.getElementById('t-enabled').checked = !!t.enabled;
+  document.getElementById('t-error').classList.add('hidden');
+  document.getElementById('tenant-dialog').showModal();
+}
+
+document.getElementById('tenant-form').addEventListener('submit', async function (ev) {
+  ev.preventDefault();
+  const original = document.getElementById('t-original-id').value;
+  const body = {
+    id: document.getElementById('t-id').value.trim(),
+    name: document.getElementById('t-name').value.trim(),
+    description: document.getElementById('t-desc').value.trim(),
+    enabled: document.getElementById('t-enabled').checked
+  };
+  const url = original ? '/api/v1/admin/tenants/' + encodeURIComponent(original) : '/api/v1/admin/tenants';
+  const method = original ? 'PUT' : 'POST';
+  if (original) body.id = original;
+  const r = await vk.fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { showErr('t-error', r); return; }
+  document.getElementById('tenant-dialog').close();
+  loadTenants();
+});
+
+async function deleteTenant(id) {
+  if (!confirm('Delete tenant "' + id + '"? Users will lose this entitlement; registry rows under that tenant are untouched.')) return;
+  const r = await vk.fetch('/api/v1/admin/tenants/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (r.ok) loadTenants(); else alert('Delete failed: ' + r.status);
+}
+
+// ----------------- Users -----------------
+async function loadUsers() {
+  const r = await vk.fetch('/api/v1/admin/users');
+  const rows = r.ok ? await r.json() : [];
+  const body = document.getElementById('users-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-gray-400">No users yet — click <strong>Add user</strong> to provision one.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(u => `
+    <tr data-testid="user-row-${u.username}">
+      <td class="font-medium">${esc(u.username)}</td>
+      <td class="text-gray-500">${esc(u.displayName||'')}</td>
+      <td class="text-gray-500">${esc(u.email||'')}</td>
+      <td><span class="badge badge-${(u.role||'reader').toLowerCase()}">${esc(u.role||'reader')}</span></td>
+      <td><span class="badge badge-${(u.source||'local').toLowerCase()}">${esc(u.source||'LOCAL')}</span></td>
+      <td class="text-xs font-mono text-gray-500">${(u.tenants||[]).map(esc).join(', ') || '—'}</td>
+      <td>${u.enabled ? '<span class="badge badge-sso">on</span>' : '<span class="badge badge-local">off</span>'}</td>
+      <td class="text-right pr-5 whitespace-nowrap">
+        <button class="btn btn-soft" data-testid="user-edit-${u.username}" onclick='editUser(${JSON.stringify(u).replace(/\'/g,"&#39;")})'>Edit</button>
+        <button class="btn btn-danger" data-testid="user-delete-${u.username}" onclick="deleteUser('${u.id}', '${esc(u.username)}')">Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+function openUserDialog() {
+  document.getElementById('user-dialog-title').textContent = 'New user';
+  document.getElementById('u-id').value = '';
+  document.getElementById('u-username').value = '';
+  document.getElementById('u-username').disabled = false;
+  document.getElementById('u-display').value = '';
+  document.getElementById('u-email').value = '';
+  document.getElementById('u-role').value = 'reader';
+  document.getElementById('u-source').value = 'LOCAL';
+  document.getElementById('u-password').value = '';
+  document.getElementById('u-tenants').value = '';
+  document.getElementById('u-enabled').checked = true;
+  document.getElementById('u-password-hint').textContent = '(required for LOCAL users)';
+  document.getElementById('u-error').classList.add('hidden');
+  onSourceChange();
+  document.getElementById('user-dialog').showModal();
+}
+function editUser(u) {
+  document.getElementById('user-dialog-title').textContent = 'Edit user';
+  document.getElementById('u-id').value = u.id;
+  document.getElementById('u-username').value = u.username;
+  document.getElementById('u-username').disabled = true;
+  document.getElementById('u-display').value = u.displayName || '';
+  document.getElementById('u-email').value = u.email || '';
+  document.getElementById('u-role').value = u.role || 'reader';
+  document.getElementById('u-source').value = u.source || 'LOCAL';
+  document.getElementById('u-password').value = '';
+  document.getElementById('u-tenants').value = (u.tenants||[]).join(', ');
+  document.getElementById('u-enabled').checked = !!u.enabled;
+  document.getElementById('u-password-hint').textContent = '(leave blank to keep existing)';
+  document.getElementById('u-error').classList.add('hidden');
+  onSourceChange();
+  document.getElementById('user-dialog').showModal();
+}
+
+function onSourceChange() {
+  const src = document.getElementById('u-source').value;
+  document.getElementById('u-password-wrap').style.display = (src === 'LOCAL') ? '' : 'none';
+}
+
+document.getElementById('user-form').addEventListener('submit', async function (ev) {
+  ev.preventDefault();
+  const id = document.getElementById('u-id').value;
+  const tenants = document.getElementById('u-tenants').value
+      .split(',').map(s => s.trim()).filter(Boolean);
+  const body = {
+    username: document.getElementById('u-username').value.trim(),
+    displayName: document.getElementById('u-display').value.trim(),
+    email: document.getElementById('u-email').value.trim(),
+    role: document.getElementById('u-role').value,
+    source: document.getElementById('u-source').value,
+    password: document.getElementById('u-password').value || null,
+    tenants: tenants,
+    enabled: document.getElementById('u-enabled').checked
+  };
+  const url = id ? '/api/v1/admin/users/' + id : '/api/v1/admin/users';
+  const method = id ? 'PUT' : 'POST';
+  const r = await vk.fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { showErr('u-error', r); return; }
+  document.getElementById('user-dialog').close();
+  loadUsers();
+});
+
+async function deleteUser(id, username) {
+  if (!confirm('Delete user "' + username + '"?')) return;
+  const r = await vk.fetch('/api/v1/admin/users/' + id, { method: 'DELETE' });
+  if (r.ok) loadUsers(); else alert('Delete failed: ' + r.status);
+}
+
+// helpers
+function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c])); }
+async function showErr(id, r) {
+  let msg = 'Failed (' + r.status + ')';
+  try {
+    const j = await r.json();
+    if (j && (j.detail || j.message)) msg = j.detail || j.message;
+  } catch(_){}
+  const el = document.getElementById(id);
+  el.textContent = msg; el.classList.remove('hidden');
+}
+
+loadTenants();
+loadUsers();
+</script>
+</body>
+</html>

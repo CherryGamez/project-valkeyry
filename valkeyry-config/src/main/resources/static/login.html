@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sign in · Valkeyry Config</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/assets/auth.js"></script>
+  <style>
+    html, body {
+      background:
+        radial-gradient(900px 600px at -10% -10%, rgba(0,122,255,0.10), transparent 60%),
+        radial-gradient(800px 500px at 110% -10%, rgba(255,45,85,0.07),  transparent 60%),
+        radial-gradient(700px 600px at 50% 110%, rgba(52,199,89,0.06),   transparent 60%),
+        #F2F2F7;
+      color: #1C1C1E;
+      min-height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    }
+    .btn-primary { background: linear-gradient(180deg,#1E8BFF,#007AFF); color:#fff; border-radius:12px; font-weight:600; box-shadow:0 8px 20px rgba(0,122,255,.32);}
+    .btn-primary:hover { filter:brightness(1.06); }
+    .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+    .field { border:1px solid rgba(60,60,67,.18); border-radius:12px; padding:.65rem .85rem; background:#fff; width:100%; font-size:14px; }
+    .field:focus { outline:none; box-shadow:0 0 0 3px rgba(0,122,255,.25); border-color:#007AFF; }
+    .card { background:rgba(255,255,255,.85); backdrop-filter: blur(24px); border:1px solid rgba(60,60,67,.12); border-radius:22px; box-shadow:0 2px 4px rgba(16,24,40,.05), 0 12px 32px rgba(16,24,40,.07); }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-8">
+      <div class="inline-flex h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 items-center justify-center mb-3 shadow-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0-3.866-3.134-7-7-7m0 0v3m0-3h3m11 11c0 3.866-3.134 7-7 7m0 0v-3m0 3h-3M4 12h16"/></svg>
+      </div>
+      <h1 class="text-2xl font-semibold tracking-tight">Valkeyry Config</h1>
+      <p class="text-sm text-gray-500 mt-1">Sign in to the schema registry admin</p>
+    </div>
+
+    <div class="card p-6 space-y-5">
+      <!-- Mode banner (shown after a redirect) -->
+      <div id="banner" class="hidden text-sm rounded-xl px-3 py-2"></div>
+
+      <!-- SSO -->
+      <div id="sso-section" class="hidden">
+        <button id="sso-btn" data-testid="sso-login-btn" type="button" class="w-full btn-primary py-2.5">
+          Login with WebSSO
+        </button>
+        <div class="flex items-center my-4 gap-3 text-xs uppercase tracking-wide text-gray-400">
+          <div class="flex-1 h-px bg-gray-200"></div><span>or</span><div class="flex-1 h-px bg-gray-200"></div>
+        </div>
+      </div>
+
+      <!-- Username / password -->
+      <form id="login-form" data-testid="login-form" class="space-y-4">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-500 mb-1.5">Username</label>
+          <input id="username" data-testid="login-username" name="username" class="field" autocomplete="username" required/>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-500 mb-1.5">Password</label>
+          <input id="password" data-testid="login-password" type="password" name="password" class="field" autocomplete="current-password" required/>
+        </div>
+        <div id="error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2"></div>
+        <button data-testid="login-submit-btn" type="submit" class="w-full btn-primary py-2.5">Login (username/pwd)</button>
+      </form>
+
+      <p class="text-xs text-gray-400 text-center pt-2">
+        Built-in admin: <code class="font-mono">admin</code> / <code class="font-mono">admin</code>
+      </p>
+    </div>
+
+    <p class="text-center text-xs text-gray-400 mt-6">© Valkeyry Config Registry</p>
+  </div>
+
+<script>
+(function () {
+  const banner = document.getElementById('banner');
+  const err = document.getElementById('error');
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('expired')) {
+    banner.textContent = 'Your session expired — please log in again.';
+    banner.className = 'text-sm rounded-xl px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200';
+  }
+
+  fetch('/api/v1/auth/config').then(r => r.json()).then(cfg => {
+    if (cfg && cfg.ssoEnabled) {
+      document.getElementById('sso-section').classList.remove('hidden');
+      document.getElementById('sso-btn').addEventListener('click', function () {
+        // Real OIDC flow would route here; for the headless server we just redirect to the issuer.
+        if (cfg.ssoAuthUrl) window.location.href = cfg.ssoAuthUrl;
+        else alert('SSO is enabled but no auth URL is configured.');
+      });
+    }
+  }).catch(() => {});
+
+  document.getElementById('login-form').addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    err.classList.add('hidden');
+    const body = {
+      username: document.getElementById('username').value.trim(),
+      password: document.getElementById('password').value
+    };
+    try {
+      const r = await fetch('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) {
+        const ct = r.headers.get('content-type') || '';
+        let msg = 'Login failed (' + r.status + ')';
+        if (ct.includes('application/json')) {
+          const j = await r.json();
+          if (j && (j.detail || j.message)) msg = j.detail || j.message;
+        }
+        err.textContent = msg;
+        err.classList.remove('hidden');
+        return;
+      }
+      const auth = await r.json();
+      vk.setAuth(auth);
+      window.location.href = (auth.mode === 'admin') ? '/admin.html' : '/';
+    } catch (e) {
+      err.textContent = 'Network error: ' + e.message;
+      err.classList.remove('hidden');
+    }
+  });
+})();
+</script>
+</body>
+</html>
