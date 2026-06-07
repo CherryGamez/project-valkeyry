@@ -45,7 +45,7 @@ spring:
   # ----- Flyway (bootstrap, blocking JDBC) -----
   flyway:
     enabled: true
-    url: ${VALKEYRY_CONFIG_JDBC_URL:jdbc:postgresql://0.0.0.0:5432/valkeyry_config}
+    url: ${VALKEYRY_CONFIG_JDBC_URL:jdbc:postgresql://0.0.0.0:5432/valkeyry_config?schema=valkeyry_config}
     user: ${VALKEYRY_CONFIG_DB_USER:valkeyry}
     password: ${VALKEYRY_CONFIG_DB_PASS:valkeyry}
     locations: classpath:db/migration
