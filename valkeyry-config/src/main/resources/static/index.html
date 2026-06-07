@@ -1216,19 +1216,29 @@ async function declareTable() {
 // ============== Schema-violation rendering (preserves user input) ==============
 function renderSchemaErrors(body) {
     const violations = body.violations || [];
+    // Violations come in three shapes across backends:
+    //   • Python mock      → { pointer: "/email", message: "not a valid email" }
+    //   • Java networknt   → { path: "$.email",   message: "..." }  (also exposes 'instanceLocation')
+    //   • Java fallback    → "raw string"                            (List<String> from SchemaValidationException)
+    // Normalise here so the UI shows a useful pointer + message for every backend.
+    const normalised = violations.map(v => {
+        if (typeof v === 'string') return { path: '$', message: v };
+        const path = v.path || v.pointer || v.instanceLocation || '$';
+        return { path, message: v.message || JSON.stringify(v) };
+    });
     const html = `
       <div class="rounded-card p-4" data-testid="schema-error"
            style="background:rgba(255,59,48,0.06); border:1px solid rgba(255,59,48,0.22);">
         <div class="text-[11px] uppercase tracking-wider font-semibold mb-2" style="color:#C0271E;">Schema validation failed</div>
         <ul class="grid gap-1.5 text-[13px] text-ink-900">
-            ${violations.map(v => `<li><span class="font-mono" style="color:#C0271E;">${escapeHtml(v.path || '$')}</span> — ${escapeHtml(v.message || JSON.stringify(v))}</li>`).join('')}
+            ${normalised.map(v => `<li><span class="font-mono" style="color:#C0271E;">${escapeHtml(v.path)}</span> — ${escapeHtml(v.message)}</li>`).join('')}
         </ul>
       </div>`;
     const openDialog = document.querySelector('dialog[open]');
     const slot = (openDialog && openDialog.querySelector('[data-testid$="-error"]')) ||
                   document.getElementById('entry-error');
     if (slot) { slot.innerHTML = html; slot.classList.remove('hidden'); }
-    else      { toast('Schema validation failed: ' + (violations[0]?.message || 'see violations'), true); }
+    else      { toast('Schema validation failed: ' + (normalised[0]?.message || 'see violations'), true); }
 }
 function renderValidationErrors(body) {
     const fields = body.fields || {};
@@ -3287,10 +3297,21 @@ async function ingestEntry(name) {
         showInlineError('entry-error', { detail: 'Record key is required' });
         return;
     }
-    const raw = document.getElementById('entry-data').value;
+    // Form mode: collect values directly from the schema-driven widgets so the user's
+    // typed values reach the API. The hidden `entry-data` textarea is only authoritative
+    // in 'json' mode — in 'form' mode it just holds the sample seed used when the table
+    // is first opened and is never synced from the live form (so reading it here would
+    // silently drop everything the user typed, then the backend would reject the empty
+    // payload with a confusing "not a valid email" / "required property missing" 422).
     let data;
-    try { data = JSON.parse(raw); }
-    catch (e) { showInlineError('entry-error', { detail: 'Data is not valid JSON: ' + e.message }); return; }
+    if (window.__entryMode === 'json') {
+        const raw = document.getElementById('entry-data').value;
+        try { data = JSON.parse(raw); }
+        catch (e) { showInlineError('entry-error', { detail: 'Data is not valid JSON: ' + e.message }); return; }
+    } else {
+        // Default = 'form' (also covers the initial render where __entryMode is unset).
+        data = collectFormValues(document.getElementById('entry-form-fields'));
+    }
 
     const url    = apiBase() + '/tables/' + encodeURIComponent(name) + '/entries';
     const body   = { recordKey, data };

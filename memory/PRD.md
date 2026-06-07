@@ -746,3 +746,30 @@ on the chain.
 **Regression test:** `src/test/java/io/valkeyry/config/security/SecurityConfigBasicAuthChallengeTest.java`
 asserts the silent handler sets 401 and emits no `WWW-Authenticate` header.
 
+### 2026-02-07 — Fix: virtual-table entry form silently dropped user input ("not a valid email")
+**Bug:** On the Console, adding any entry to a virtual table via the Form-mode editor failed
+with `SCHEMA VALIDATION FAILED — $ — not a valid email` (or `required property missing`) even
+when the user clearly typed a valid email like `test@gmx.com` or `test@test.com`. The 422
+response showed the request body had `data.email = ""` — the form values weren't being read at
+all.
+
+**Root cause:** `index.html#ingestEntry()` always read from the hidden `#entry-data` textarea
+which is seeded by `sampleFromSchema(schema)` — and that helper inserts `""` for every
+required string. In Form mode, the live schema-driven widgets (`#entry-form-fields`) are never
+synced back to the textarea, so the request submitted the empty seed rather than what the user
+typed.
+
+**Fix:** `valkeyry-config/src/main/resources/static/index.html`
+- `ingestEntry()` now branches on `window.__entryMode`:
+  - `json` → read from the textarea (unchanged, the textarea *is* the source of truth there)
+  - default/`form` → call `collectFormValues(entry-form-fields)` so the user's typed values
+    reach the API.
+- `renderSchemaErrors()` now normalises violation shapes across all three backends
+  (Python mock: `pointer`/`message`, Java networknt: `path`/`instanceLocation`, Java fallback:
+  raw string). Previously every violation displayed pointer `$` because the UI only looked at
+  `v.path` which the mock never sets.
+
+**Verified** end-to-end on the running preview:
+- `test@gmx.com` + form submit → 201 + toast "Entry 'newuser1' saved", row appears in list.
+- Invalid email caught client-side by the native `<input type="email">` validator before submit.
+
