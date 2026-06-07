@@ -1,0 +1,351 @@
+{
+  "info": {
+    "_postman_id": "valkeyry-config-2026-02",
+    "name": "Valkeyry Config — full API",
+    "description": "Hand-tested collection covering every public endpoint of `valkeyry-config`. Set the `baseUrl`, `tenant`, `apiKey`, `username`, `password` collection variables (or use the environment file) and run the requests top-to-bottom — earlier requests stash the JWT, table name and record key into variables so the later ones work without copy-paste.\n\nRequests are grouped:\n1. **Health & OpenAPI** — anonymous, no auth needed.\n2. **Auth** — login → JWT, /me, /logout.\n3. **Admin** — tenants + users CRUD (admin JWT required).\n4. **Virtual Tables** — declare schema, ingest entries (single + batch), search, history.\n5. **Tools — file converters** — XLSX, CSV, DMN.\n6. **Webhooks** — register, list, delete a SIEM/audit fan-out target.\n7. **Audit & Rollback** — read the audit log, roll back a change.\n\nMatching files live next to this collection at `examples/import/` and `examples/webhooks/`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",  "value": "http://localhost:8081", "description": "Spring backend root. Use 8082 if you ran the jar on a custom port." },
+    { "key": "tenant",   "value": "demo-tenant" },
+    { "key": "apiKey",   "value": "plugin-test-key" },
+    { "key": "username", "value": "admin" },
+    { "key": "password", "value": "admin" },
+    { "key": "jwt",      "value": "" },
+    { "key": "tableName","value": "customers" },
+    { "key": "recordKey","value": "C-1001" },
+    { "key": "webhookId","value": "" },
+    { "key": "auditId",  "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1 · Health & OpenAPI",
+      "item": [
+        {
+          "name": "GET /actuator/health",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/actuator/health", "host": ["{{baseUrl}}"], "path": ["actuator","health"] }
+          }
+        },
+        {
+          "name": "GET /v3/api-docs",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/v3/api-docs", "host": ["{{baseUrl}}"], "path": ["v3","api-docs"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 · Auth",
+      "item": [
+        {
+          "name": "POST /api/v1/auth/login (admin/admin → JWT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.expect(pm.response.code).to.eql(200);",
+                  "pm.expect(json.token, 'token is present').to.be.a('string');",
+                  "// Write to BOTH scopes so the variable wins whether the user runs the",
+                  "// collection with or without an environment selected (env vars shadow",
+                  "// collection vars when both are present).",
+                  "pm.collectionVariables.set('jwt', json.token);",
+                  "if (pm.environment.name) { pm.environment.set('jwt', json.token); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","login"] }
+          }
+        },
+        {
+          "name": "GET /api/v1/auth/me (Bearer)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","me"] }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/logout (Bearer)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api","v1","auth","logout"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 · Admin (tenants + users)",
+      "item": [
+        {
+          "name": "GET /api/v1/admin/tenants",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/admin/tenants", "host": ["{{baseUrl}}"], "path": ["api","v1","admin","tenants"] }
+          }
+        },
+        {
+          "name": "POST /api/v1/admin/tenants",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"id\":   \"acme\",\n  \"name\": \"Acme Industries\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/admin/tenants", "host": ["{{baseUrl}}"], "path": ["api","v1","admin","tenants"] }
+          }
+        },
+        {
+          "name": "GET /api/v1/admin/users",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/admin/users", "host": ["{{baseUrl}}"], "path": ["api","v1","admin","users"] }
+          }
+        },
+        {
+          "name": "POST /api/v1/admin/users (create a writer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"alice\",\n  \"password\": \"alice-pass\",\n  \"email\":    \"alice@acme.io\",\n  \"role\":     \"writer\",\n  \"enabled\":  true,\n  \"tenants\":  [\"acme\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/admin/users", "host": ["{{baseUrl}}"], "path": ["api","v1","admin","users"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 · Virtual Tables (entries CRUD)",
+      "item": [
+        {
+          "name": "GET /tables",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables"] }
+          }
+        },
+        {
+          "name": "POST /tables (declare 'customers' schema)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key",    "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"tableName\": \"{{tableName}}\",\n  \"schema\": {\n    \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n    \"type\": \"object\",\n    \"required\": [\"customerId\", \"email\"],\n    \"properties\": {\n      \"customerId\":  { \"type\": \"string\" },\n      \"name\":        { \"type\": \"string\" },\n      \"email\":       { \"type\": \"string\", \"format\": \"email\" },\n      \"tier\":        { \"type\": \"string\", \"enum\": [\"gold\",\"silver\",\"bronze\"] },\n      \"active\":      { \"type\": \"boolean\" },\n      \"joinedAt\":    { \"type\": \"string\", \"format\": \"date\" },\n      \"creditLimit\": { \"type\": \"number\", \"minimum\": 0 }\n    },\n    \"additionalProperties\": false\n  }\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables"] }
+          }
+        },
+        {
+          "name": "POST /tables/{name}/entries (single)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key",    "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"recordKey\": \"{{recordKey}}\",\n  \"data\": {\n    \"customerId\":  \"{{recordKey}}\",\n    \"name\":        \"Acme Corp\",\n    \"email\":       \"procurement@acme.io\",\n    \"tier\":        \"gold\",\n    \"active\":      true,\n    \"joinedAt\":    \"2024-01-15\",\n    \"creditLimit\": 250000\n  }\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries"] }
+          }
+        },
+        {
+          "name": "POST /tables/{name}/entries:batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key",    "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"entries\": [\n    { \"recordKey\": \"C-1002\", \"data\": { \"customerId\": \"C-1002\", \"name\": \"Globex\",  \"email\": \"billing@globex.io\",   \"tier\": \"silver\", \"active\": true,  \"joinedAt\": \"2024-03-22\", \"creditLimit\":  80000 } },\n    { \"recordKey\": \"C-1003\", \"data\": { \"customerId\": \"C-1003\", \"name\": \"Initech\", \"email\": \"it@initech.com\",      \"tier\": \"bronze\", \"active\": true,  \"joinedAt\": \"2024-06-30\", \"creditLimit\":  20000 } },\n    { \"recordKey\": \"C-1004\", \"data\": { \"customerId\": \"C-1004\", \"name\": \"Hooli\",   \"email\": \"partners@hooli.xyz\",  \"tier\": \"gold\",   \"active\": false, \"joinedAt\": \"2023-11-10\", \"creditLimit\": 500000 } }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries:batch", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries:batch"] }
+          }
+        },
+        {
+          "name": "GET /tables/{name}/entries?limit=50",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries?limit=50", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries"], "query": [{ "key": "limit", "value": "50" }] }
+          }
+        },
+        {
+          "name": "GET /tables/{name}/entries/{recordKey}",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries/{{recordKey}}", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries","{{recordKey}}"] }
+          }
+        },
+        {
+          "name": "GET /tables/{name}/entries/{recordKey}/history",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries/{{recordKey}}/history", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries","{{recordKey}}","history"] }
+          }
+        },
+        {
+          "name": "POST /tables/{name}/search (gold tier)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key",    "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"conditions\": [\n    { \"path\": \"tier\",   \"op\": \"eq\", \"value\": \"gold\" },\n    { \"path\": \"active\", \"op\": \"eq\", \"value\": true   }\n  ]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/search", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","search"] }
+          }
+        },
+        {
+          "name": "DELETE /tables/{name}/entries/{recordKey}",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries/{{recordKey}}", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries","{{recordKey}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 · Tools — file converters",
+      "item": [
+        {
+          "name": "POST /tools/convert/csv",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "body": { "mode": "formdata", "formdata": [
+              { "key": "file", "type": "file", "src": "examples/import/customers.csv" }
+            ]},
+            "url": { "raw": "{{baseUrl}}/api/v1/tools/convert/csv", "host": ["{{baseUrl}}"], "path": ["api","v1","tools","convert","csv"] }
+          }
+        },
+        {
+          "name": "POST /tools/convert/xlsx",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "body": { "mode": "formdata", "formdata": [
+              { "key": "file", "type": "file", "src": "examples/import/products.xlsx" }
+            ]},
+            "url": { "raw": "{{baseUrl}}/api/v1/tools/convert/xlsx", "host": ["{{baseUrl}}"], "path": ["api","v1","tools","convert","xlsx"] }
+          }
+        },
+        {
+          "name": "POST /tools/convert/dmn",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "body": { "mode": "formdata", "formdata": [
+              { "key": "file", "type": "file", "src": "examples/import/loan-approval.dmn" }
+            ]},
+            "url": { "raw": "{{baseUrl}}/api/v1/tools/convert/dmn", "host": ["{{baseUrl}}"], "path": ["api","v1","tools","convert","dmn"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6 · Audit webhooks",
+      "item": [
+        {
+          "name": "GET /tenants/{t}/webhooks (list)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/webhooks", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","webhooks"] }
+          }
+        },
+        {
+          "name": "POST /tenants/{t}/webhooks (register)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const id = pm.response.json().id;",
+                  "  pm.collectionVariables.set('webhookId', id);",
+                  "  if (pm.environment.name) { pm.environment.set('webhookId', id); }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"url\":         \"http://host.docker.internal:9099/audit\",\n  \"description\": \"Local dev receiver (see examples/webhooks/receiver.js)\",\n  \"secret\":      \"local-dev-hmac-secret-32-bytes-long\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/webhooks", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","webhooks"] }
+          }
+        },
+        {
+          "name": "DELETE /tenants/{t}/webhooks/{id}",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/webhooks/{{webhookId}}", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","webhooks","{{webhookId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7 · Audit & rollback",
+      "item": [
+        {
+          "name": "GET /tenants/{t}/audit?limit=20",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const arr = pm.response.json();",
+                  "  if (Array.isArray(arr) && arr.length > 0) {",
+                  "    pm.collectionVariables.set('auditId', arr[0].id);",
+                  "    if (pm.environment.name) { pm.environment.set('auditId', arr[0].id); }",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/audit?limit=20", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","audit"], "query": [{ "key": "limit", "value": "20" }] }
+          }
+        },
+        {
+          "name": "POST /tenants/{t}/audit/{id}/rollback",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/audit/{{auditId}}/rollback", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","audit","{{auditId}}","rollback"] }
+          }
+        }
+      ]
+    }
+  ]
+}

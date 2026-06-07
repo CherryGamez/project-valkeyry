@@ -679,4 +679,103 @@ docker compose -f docker-compose.dev.yml down -v
 docker rm -f valkeyry-ldap valkeyry-oidc
 ```
 
+---
+
+## 11. Examples folder — fixtures + recipes
+
+All artefacts referenced from the sections above live under
+[`examples/`](examples/). Verified end-to-end against `:8082` with Newman + a
+local Node receiver — see `examples/README.md` for the layout.
+
+### 11.1 Postman / Newman — full API regression
+
+```powershell
+# Postman desktop:
+#   File → Import → drop both files from examples\postman\
+#   then pick the "valkeyry-config (local)" environment top-right.
+
+# Or run headless with Newman (good for CI):
+winget install OpenJS.NodeJS.LTS    # if Node isn't already present
+npm install -g newman
+
+cd valkeyry-config
+newman run examples\postman\valkeyry-config.postman_collection.json `
+       -e   examples\postman\valkeyry-config-local.postman_environment.json `
+       --working-dir .
+```
+
+Folders execute top-to-bottom and chain via test scripts:
+
+1. *Health & OpenAPI* (anonymous)
+2. *Auth* — login captures `{{jwt}}` into the environment
+3. *Admin* — tenants + users CRUD with the captured JWT
+4. *Virtual Tables* — schema declare, single + **batch** ingest, search, history, delete
+5. *Tools — file converters* — uploads `examples\import\{customers.csv, products.xlsx, loan-approval.dmn}`
+6. *Audit webhooks* — register / list / delete (captures `{{webhookId}}`)
+7. *Audit & rollback* — captures the most recent audit `id` then rolls it back
+
+A green Newman run = every public endpoint is reachable with the documented
+contract.
+
+### 11.2 File imports — Tools tab + plugin demos
+
+| File                                       | Goes to                              | Produces                                            |
+|--------------------------------------------|--------------------------------------|-----------------------------------------------------|
+| `examples\import\customers.csv`            | `POST /api/v1/tools/convert/csv`     | 1 table × 8 rows × 7 columns                        |
+| `examples\import\products.xlsx`            | `POST /api/v1/tools/convert/xlsx`    | 2 tables (`products`, `stock`)                      |
+| `examples\import\loan-approval.dmn`        | `POST /api/v1/tools/convert/dmn`     | 1 table (hit-policy `FIRST`) × 6 rules × 5 columns  |
+
+UI flow: **Tools → Convert (Excel/CSV/DMN) → upload → Stage as `:batch` payload**.
+
+cURL flow (`curl.exe` ships with Windows 10+; PowerShell's built-in `curl`
+alias points to `Invoke-WebRequest`, so call `curl.exe` explicitly):
+
+```powershell
+curl.exe -X POST http://localhost:8081/api/v1/tools/convert/dmn `
+         -H "X-API-Key: $env:VALKEYRY_API_KEY" `
+         -F "file=@examples\import\loan-approval.dmn" | ConvertFrom-Json | Select-Object -ExpandProperty tables | Select-Object -First 1
+```
+
+Regenerate the XLSX file (after editing the script):
+
+```powershell
+py -m pip install openpyxl
+py examples\import\_generate_products_xlsx.py
+```
+
+### 11.3 Audit webhooks — register + verify HMAC
+
+Two PowerShell windows:
+
+```powershell
+# Window 1 — start the receiver (Node ≥ 18)
+cd valkeyry-config\examples\webhooks
+node receiver.js                                # listens on :9099
+
+# Window 2 — register + trigger
+$JWT = (curl.exe -s -X POST http://localhost:8081/api/v1/auth/login `
+        -H 'Content-Type: application/json' `
+        -d '{"username":"admin","password":"admin"}' | ConvertFrom-Json).token
+
+curl.exe -X POST http://localhost:8081/api/v1/tenants/demo-tenant/webhooks `
+         -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' `
+         -d '{ \"url\":\"http://host.docker.internal:9099/audit\",
+                \"secret\":\"local-dev-hmac-secret-32-bytes-long\" }'
+
+# Any audit event triggers a fan-out:
+curl.exe -X POST http://localhost:8081/api/v1/tenants/demo-tenant/tables `
+         -H 'X-API-Key: plugin-test-key' -H 'Content-Type: application/json' `
+         -d '{\"tableName\":\"ping\",\"schema\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}}}}'
+```
+
+Window 1 should print the event headers, body and `Signature valid? : YES`.
+Full payload reference: [`examples\webhooks\README.md`](examples/webhooks/README.md).
+
+> **PowerShell quoting tip:** the inner JSON in the `-d` flag uses escaped
+> double quotes (`\"`). If you prefer single quotes outside and double quotes
+> inside, you can also write the body to a file and use `-d "@payload.json"`.
+
+---
+
 Happy shipping.
+

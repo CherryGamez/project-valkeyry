@@ -1,0 +1,9 @@
+customerId,name,email,tier,active,joinedAt,creditLimit
+C-1001,Acme Corp,procurement@acme.io,gold,true,2024-01-15,250000
+C-1002,Globex,billing@globex.io,silver,true,2024-03-22,80000
+C-1003,Initech,it@initech.com,bronze,true,2024-06-30,20000
+C-1004,Hooli,partners@hooli.xyz,gold,false,2023-11-10,500000
+C-1005,Pied Piper,founders@piedpiper.com,bronze,true,2024-09-01,15000
+C-1006,Soylent Corp,ops@soylent.io,silver,true,2024-04-18,65000
+C-1007,Cyberdyne,research@cyberdyne.com,gold,true,2024-02-02,420000
+C-1008,Wonka Industries,sweets@wonka.com,bronze,false,2023-08-14,12500

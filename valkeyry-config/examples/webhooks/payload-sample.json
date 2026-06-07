@@ -1,0 +1,25 @@
+{
+  "id":          "01HF1Z9EQK0R9C5VYWQ7G8WK3B",
+  "tenantId":    "demo-tenant",
+  "tableName":   "customers",
+  "operation":   "DECLARE_TABLE",
+  "recordKey":   null,
+  "beforeValue": null,
+  "afterValue": {
+    "$schema":    "https://json-schema.org/draft/2020-12/schema",
+    "type":       "object",
+    "required":   ["customerId", "email"],
+    "properties": {
+      "customerId":  { "type": "string" },
+      "email":       { "type": "string", "format": "email" },
+      "tier":        { "type": "string", "enum": ["gold", "silver", "bronze"] },
+      "active":      { "type": "boolean" },
+      "creditLimit": { "type": "number", "minimum": 0 }
+    },
+    "additionalProperties": false
+  },
+  "actor":      "api-key:plugin-test-key",
+  "actorTrack": "API_KEY",
+  "changedAt":  "2026-02-07T15:42:11.314Z",
+  "requestId":  "67024b5d-27"
+}

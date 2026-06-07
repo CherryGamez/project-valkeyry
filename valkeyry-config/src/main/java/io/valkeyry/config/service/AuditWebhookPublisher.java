@@ -51,13 +51,15 @@ public class AuditWebhookPublisher {
     private final ObjectMapper mapper;
     private final WebClient webClient;
 
-    public AuditWebhookPublisher() {
-        this.props = null;
-        this.subscriptions = null;
-        this.mapper = null;
-        this.webClient = null;
-    }
+    // NOTE: previously this class shipped a public no-arg constructor that set every field to
+    // null. With Spring's "ambiguous constructor → pick the no-arg one" fallback for non-
+    // annotated beans, the production wiring ended up using that constructor — which then
+    // NPE'd on the very first audit event ("ObjectMapper is null"). Audit webhooks have been
+    // removed from that ambiguity by deleting the no-arg constructor: there is now a single
+    // 3-arg constructor which Spring auto-wires unconditionally. Tests construct the 2-arg
+    // overload below.
 
+    @org.springframework.beans.factory.annotation.Autowired
     public AuditWebhookPublisher(AuditWebhookProperties props,
                                  AuditWebhookSubscriptionRepository subscriptions,
                                  ObjectMapper mapper) {

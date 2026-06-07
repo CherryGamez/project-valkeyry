@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Loan approval DMN — example for `POST /api/v1/tools/convert/dmn`.
+  Six rules across three inputs (credit score, income bracket, loan amount) producing
+  an approval decision + a risk tier. Tested against the Valkeyry Tools tab and the
+  raw API; the conversion emits one entry in `tables[]` and seven (header + six rules)
+  in `rows[]` — ready to ingest with `:batch`.
+-->
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             id="loan-approval-defs"
+             name="loan-approval-defs"
+             namespace="http://valkeyry.io/dmn/loan-approval">
+    <decision id="loan_approval" name="Loan Approval">
+        <decisionTable id="dt_loan_approval" hitPolicy="FIRST">
+            <input id="in_score" label="Credit score">
+                <inputExpression id="ie_score" typeRef="integer">
+                    <text>creditScore</text>
+                </inputExpression>
+            </input>
+            <input id="in_income" label="Income bracket">
+                <inputExpression id="ie_income" typeRef="string">
+                    <text>incomeBracket</text>
+                </inputExpression>
+            </input>
+            <input id="in_amount" label="Loan amount (USD)">
+                <inputExpression id="ie_amount" typeRef="integer">
+                    <text>loanAmount</text>
+                </inputExpression>
+            </input>
+            <output id="out_decision" label="Decision" name="decision" typeRef="string"/>
+            <output id="out_tier"     label="Risk tier" name="riskTier" typeRef="string"/>
+
+            <rule id="r1">
+                <inputEntry id="r1_ie1"><text>&lt; 580</text></inputEntry>
+                <inputEntry id="r1_ie2"><text>-</text></inputEntry>
+                <inputEntry id="r1_ie3"><text>-</text></inputEntry>
+                <outputEntry id="r1_oe1"><text>"DECLINE"</text></outputEntry>
+                <outputEntry id="r1_oe2"><text>"HARD_DECLINE"</text></outputEntry>
+            </rule>
+            <rule id="r2">
+                <inputEntry id="r2_ie1"><text>[580..669]</text></inputEntry>
+                <inputEntry id="r2_ie2"><text>"low"</text></inputEntry>
+                <inputEntry id="r2_ie3"><text>-</text></inputEntry>
+                <outputEntry id="r2_oe1"><text>"DECLINE"</text></outputEntry>
+                <outputEntry id="r2_oe2"><text>"AFFORDABILITY"</text></outputEntry>
+            </rule>
+            <rule id="r3">
+                <inputEntry id="r3_ie1"><text>[580..669]</text></inputEntry>
+                <inputEntry id="r3_ie2"><text>"mid","high"</text></inputEntry>
+                <inputEntry id="r3_ie3"><text>&lt;= 50000</text></inputEntry>
+                <outputEntry id="r3_oe1"><text>"REVIEW"</text></outputEntry>
+                <outputEntry id="r3_oe2"><text>"MEDIUM"</text></outputEntry>
+            </rule>
+            <rule id="r4">
+                <inputEntry id="r4_ie1"><text>[670..739]</text></inputEntry>
+                <inputEntry id="r4_ie2"><text>-</text></inputEntry>
+                <inputEntry id="r4_ie3"><text>&lt;= 250000</text></inputEntry>
+                <outputEntry id="r4_oe1"><text>"APPROVE"</text></outputEntry>
+                <outputEntry id="r4_oe2"><text>"STANDARD"</text></outputEntry>
+            </rule>
+            <rule id="r5">
+                <inputEntry id="r5_ie1"><text>&gt;= 740</text></inputEntry>
+                <inputEntry id="r5_ie2"><text>-</text></inputEntry>
+                <inputEntry id="r5_ie3"><text>&lt;= 500000</text></inputEntry>
+                <outputEntry id="r5_oe1"><text>"APPROVE"</text></outputEntry>
+                <outputEntry id="r5_oe2"><text>"PRIME"</text></outputEntry>
+            </rule>
+            <rule id="r6">
+                <inputEntry id="r6_ie1"><text>-</text></inputEntry>
+                <inputEntry id="r6_ie2"><text>-</text></inputEntry>
+                <inputEntry id="r6_ie3"><text>&gt; 500000</text></inputEntry>
+                <outputEntry id="r6_oe1"><text>"REVIEW"</text></outputEntry>
+                <outputEntry id="r6_oe2"><text>"JUMBO"</text></outputEntry>
+            </rule>
+        </decisionTable>
+    </decision>
+</definitions>
