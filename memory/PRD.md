@@ -805,3 +805,19 @@ to removes the foot-gun entirely.
 - Verified: dropdown shows `demo-tenant — Demo Tenant` and `test — test` after creating `test`
   via the Admin GUI.
 
+
+### 2026-02-07 — End-to-end validation of the Basic-Auth fix on the real Spring backend
+Installed Temurin JDK 21 + Maven 3.9.9 + PostgreSQL 15 in the pod and ran the actual
+`valkeyry-config` Spring Boot jar (Flyway migrations + Netty on :8082) against two LDAP
+configurations. Results from raw `curl -D -` against `/api/v1/tenants/demo-tenant/tables`:
+
+| Scenario | `VALKEYRY_LDAP_ENABLED=false` | `VALKEYRY_LDAP_ENABLED=true` |
+|---|---|---|
+| Bad `X-API-Key` (the original bug trigger) | `401`, no `WWW-Authenticate` | `401`, no `WWW-Authenticate` |
+| Bad `Basic admin:wrongpw` (the browser-auto-retry leg of the loop) | n/a | `401`, **no `WWW-Authenticate: Basic`** |
+| Valid `X-API-Key: plugin-test-key` | `200 OK` | `200 OK` |
+| No auth | `401`, `WWW-Authenticate: Bearer` (correct — Bearer is fine, browsers don't prompt for Bearer) | same |
+
+Also ran the full module test suite — `mvn -pl valkeyry-config test` → 53 tests, 0 failures,
+including the new `SecurityConfigBasicAuthChallengeTest`.
+
