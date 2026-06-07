@@ -59,18 +59,23 @@ public class AuditRollbackController {
     }
 
     @PostMapping("/{auditId}/rollback")
-    @Operation(summary = "Rollback an entry to a prior audit state",
-               description = "Re-ingests the `beforeValue` of the named audit row as a new version of the original record. Only record-level audit entries (with a non-null `recordKey` and `beforeValue`) are rollbackable.")
+    @Operation(summary = "Rollback an entry or a deleted table to a prior audit state",
+               description = "Re-applies the `beforeValue` of the named audit row. For record-level ops "
+                           + "({@code INGEST_RECORD}, {@code DELETE_RECORD}, {@code ROLLBACK}) the value is "
+                           + "re-ingested as a new version of the original record. For {@code DELETE_TABLE} "
+                           + "the value (a schema snapshot) is re-declared — the registry row comes back and "
+                           + "orphaned entries become visible again. {@code DECLARE_TABLE} / {@code REVISE_TABLE} "
+                           + "events are not yet rollback-able through this path.")
     @ApiResponses({
-        @ApiResponse(responseCode = "201", description = "Rollback applied — a new version was written"),
-        @ApiResponse(responseCode = "400", description = "Audit row is not rollbackable (table-level or has no prior value)"),
+        @ApiResponse(responseCode = "201", description = "Rollback applied — a new version (or restored table) was written"),
+        @ApiResponse(responseCode = "400", description = "Audit row is not rollbackable (declare/revise event, or no prior value)"),
         @ApiResponse(responseCode = "404", description = "Audit row not found in this tenant"),
         @ApiResponse(responseCode = "409", description = "Idempotency-skip — record already at that state")
     })
-    public Mono<ResponseEntity<EntryView>> rollback(@PathVariable String tenantId,
-                                                    @PathVariable UUID auditId,
-                                                    Authentication auth,
-                                                    ServerWebExchange exchange) {
+    public Mono<ResponseEntity<?>> rollback(@PathVariable String tenantId,
+                                            @PathVariable UUID auditId,
+                                            Authentication auth,
+                                            ServerWebExchange exchange) {
         String track = AuthTrack.of(auth).name();
         String requestId = exchange.getRequest().getId();
         return guard.check(auth, tenantId)
@@ -78,19 +83,26 @@ public class AuditRollbackController {
                 .switchIfEmpty(Mono.error(new VirtualTableNotFoundException(tenantId, "audit/" + auditId)))
                 .flatMap(entry -> {
                     String op = entry.getOperation();
-                    if (entry.getRecordKey() == null || entry.getRecordKey().isBlank()) {
-                        return Mono.error(new IllegalArgumentException(
-                                "Cannot roll back table-level audit op " + op + " — only record entries are restorable"));
-                    }
                     JsonNode before = parse(entry.getBeforeValue());
                     if (before == null || before.isNull()) {
                         return Mono.error(new IllegalArgumentException(
                                 "Cannot roll back: audit entry " + auditId + " has no prior value"));
                     }
+                    // Table-level: re-declare the schema from beforeValue. No recordKey involved.
+                    if ("DELETE_TABLE".equals(op)) {
+                        return tables.rollbackTableDeletion(tenantId, entry.getTableName(), before,
+                                        auth.getName(), track, requestId)
+                                .<ResponseEntity<?>>map(v -> ResponseEntity.status(HttpStatus.CREATED).body(v));
+                    }
+                    // Record-level: re-ingest the prior payload.
+                    if (entry.getRecordKey() == null || entry.getRecordKey().isBlank()) {
+                        return Mono.error(new IllegalArgumentException(
+                                "Cannot roll back table-level audit op " + op + " — only DELETE_TABLE and record entries are restorable"));
+                    }
                     return tables.rollback(tenantId, entry.getTableName(), entry.getRecordKey(),
-                            before, auth.getName(), track, requestId);
-                })
-                .map(v -> ResponseEntity.status(HttpStatus.CREATED).body(v));
+                                    before, auth.getName(), track, requestId)
+                            .<ResponseEntity<?>>map(v -> ResponseEntity.status(HttpStatus.CREATED).body(v));
+                });
     }
 
     private JsonNode parse(Json j) {

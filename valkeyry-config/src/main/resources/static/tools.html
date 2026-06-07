@@ -280,6 +280,21 @@ function typeOfJson(v) {
     return 'string';
 }
 
+// Normalise a table name to match the backend's `^[a-zA-Z0-9_-]+$` rule so the resulting
+// URL never needs percent-encoding and the table can always be picked up by selectors that
+// embed it in a `data-testid`. "Loan Approval" → `loan_approval`, "Sheet 1!" → `sheet_1`,
+// "résumé" → `r_sum_` (diacritics stripped — these come from random CSV/XLSX/DMN exports
+// so we can't trust them). Empty after stripping ⇒ caller falls back to `imported_table`.
+function slugifyTableName(raw) {
+    const s = String(raw || '')
+        .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')   // strip accents
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')                       // collapse anything else to _
+        .replace(/^_+|_+$/g, '')                             // trim leading/trailing _
+        .replace(/_+/g, '_');                                // collapse runs of _
+    return s || '';
+}
+
 document.getElementById('import-btn').addEventListener('click', async () => {
     const result = document.getElementById('result');
     const j = result && result.__data;
@@ -295,7 +310,10 @@ document.getElementById('import-btn').addEventListener('click', async () => {
 
     const log = [];
     for (const table of j.tables) {
-        const tn = table.tableName;
+        // Original name (often "Loan Approval", "Sheet1", etc.) → URL-safe slug. Show both
+        // in the status row so the user sees the transformation that's about to happen.
+        const original = table.tableName;
+        const tn = slugifyTableName(original) || 'imported_table';
         try {
             // 1. Declare schema (idempotent — backend revises if it already exists).
             const declareRes = await vk.fetch(`/api/v1/tenants/${encodeURIComponent(tenantId)}/tables`, {
@@ -327,7 +345,8 @@ document.getElementById('import-btn').addEventListener('click', async () => {
             if (ingestRes.ok) {
                 const inserted   = ingestBody.inserted   ?? entries.length;
                 const duplicates = ingestBody.duplicates ?? 0;
-                log.push(`<div class="text-green-700">✓ <code>${tn}</code> · ${inserted} inserted, ${duplicates} duplicate(s)</div>`);
+                const renameNote = (tn !== original) ? ` <span class="text-gray-500">(renamed from "${escapeHtml(original)}")</span>` : '';
+                log.push(`<div class="text-green-700">✓ <code>${tn}</code>${renameNote} · ${inserted} inserted, ${duplicates} duplicate(s)</div>`);
             } else {
                 log.push(`<div class="text-red-600">✗ <code>${tn}</code> · ingest failed (${ingestRes.status})</div>`);
             }

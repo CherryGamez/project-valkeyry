@@ -685,13 +685,37 @@ def rollback(tenant_id: str, audit_id: str):
     audit = next((a for a in t["audit"] if a["id"] == audit_id), None)
     if not audit:
         raise HTTPException(status_code=404, detail="Audit entry not found")
-    if not audit.get("recordKey") or audit.get("beforeValue") is None:
+    before = audit.get("beforeValue")
+    if before is None:
         return JSONResponse(status_code=409,
                             content={"type":"urn:valkeyry:error:not-rollbackable",
                                      "title":"Not rollbackable","status":409,
-                                     "detail":"Only INGEST_ROW with a prior value can be rolled back"})
+                                     "detail":"Audit entry has no prior value to restore"})
+    # Table-level rollback — DELETE_TABLE writes the schema snapshot into beforeValue.
+    # Re-declare the table from that snapshot and the entries history (still in t['history'])
+    # becomes addressable again via GET /entries.
+    if audit.get("operation") == "DELETE_TABLE":
+        # The Java service stores the schema JSON directly in beforeValue. The mock stores it
+        # nested under {"schema": ...} (see delete_table above) — handle either shape.
+        schema = before.get("schema") if isinstance(before, dict) and "schema" in before else before
+        existing = t["tables"].get(audit["tableName"])
+        version = (existing.get("configVersion", 0) + 1) if existing else 1
+        t["tables"][audit["tableName"]] = {
+            "schema": schema, "createdAt": now_iso(), "configVersion": version,
+        }
+        push_audit(tenant_id, op="REVISE_TABLE" if existing else "DECLARE_TABLE",
+                   table=audit["tableName"], record_key=None,
+                   before=None, after={"schema": schema}, version=version, record_version=0)
+        return {"tableName": audit["tableName"], "schema": schema,
+                "createdAt": t["tables"][audit["tableName"]]["createdAt"], "configVersion": version}
+    # Record-level rollback — only meaningful when we have a recordKey + non-null beforeValue.
+    if not audit.get("recordKey"):
+        return JSONResponse(status_code=409,
+                            content={"type":"urn:valkeyry:error:not-rollbackable",
+                                     "title":"Not rollbackable","status":409,
+                                     "detail":"Only DELETE_TABLE or record-level audits with a prior value can be rolled back"})
     return ingest(tenant_id, audit["tableName"],
-                  IngestEntryRequest(recordKey=audit["recordKey"], data=audit["beforeValue"]))
+                  IngestEntryRequest(recordKey=audit["recordKey"], data=before))
 
 # ─────────── Webhooks ───────────
 

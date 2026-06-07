@@ -933,3 +933,39 @@ a file converts successfully. The flow:
   managed in admin page. Still awaits user choice a/b/c.
 - `VALKEYRY_API_KEYS` parser uses `;` instead of `,` — still queued.
 
+
+### 2026-02-07 — Fixes: table-name slugify on import + DELETE_TABLE rollback
+**Three issues from user (testing against local Java backend on :8081):**
+
+**1. Imported tables with spaces (e.g. `Loan Approval`) couldn't be deleted + entries didn't show**
+Root cause: the Tools-import flow shipped whatever `tableName` the converter returned
+straight into the URL. The backend's manual-declare path rejects names not matching
+`^[a-zA-Z0-9_-]+$`, but the auto-import path bypassed that validation — so tables ended up
+with names like `Loan Approval` which break URL routing on later GETs/DELETEs.
+Fix: `tools.html` → new `slugifyTableName(raw)` helper. Normalises NFKD, strips diacritics,
+lowercases, replaces non-alphanumerics with `_`, collapses runs. Applied before the declare
++ batch-ingest calls. The status row also calls out the rename: "✓ `loan_approval`
+(renamed from "Loan Approval") · 6 inserted, 0 duplicate(s)".
+
+**2. Delete table dialog claimed rollback was supported but the audit timeline had no Rollback button**
+The delete prompt copy promised "entry history is preserved (rollback re-creates it)" but
+`isRollbackable()` in `index.html` excluded `DELETE_TABLE` ops. The Java
+`AuditRollbackController` and the Python mock both also rejected table-level events as
+"only record entries are restorable".
+Fix (full stack):
+- `index.html#isRollbackable()` now accepts `DELETE_TABLE` when `beforeValue` is non-null.
+- `VirtualTableService#rollbackTableDeletion()` (new) — re-declares the table from the
+  schema snapshot in `beforeValue`. Routes through the existing `declare()` so the rollback
+  itself emits a `DECLARE_TABLE`/`REVISE_TABLE` audit row (= idempotent + reversible).
+- `AuditRollbackController#rollback()` — now branches on `op == "DELETE_TABLE"` and calls
+  the table-restore path; record-level path unchanged.
+- Python mock `/audit/{id}/rollback` mirrors the same branching.
+
+**3. "Make sure all REST API endpoints are tested and verified"**
+- `mvn -pl valkeyry-config test` → **53/53 pass**.
+- `newman run examples/postman/valkeyry-config.postman_collection.json` against the
+  preview-pod mock → **27/27 requests pass, 0 failures**.
+- Direct curl proof of the DELETE_TABLE rollback round-trip:
+  declare → ingest(2) → DELETE → audit returns op=DELETE_TABLE → POST /rollback → table
+  comes back with the same schema → all status codes match (201/204/201/200).
+

@@ -225,6 +225,25 @@ public class VirtualTableService {
         return tx.transactional(work);
     }
 
+    /**
+     * Rolls back a {@code DELETE_TABLE} audit row by re-declaring the schema that was active
+     * at the time of the delete.
+     *
+     * <p>The audit row's {@code beforeValue} is the schema JSON itself (see
+     * {@link #softDeleteTable}). We simply call {@link #declareTable} with that payload —
+     * which writes a new registry row and a {@code REVISE_TABLE} audit entry, so the action
+     * is itself reversible.</p>
+     *
+     * <p>If a NEW table with the same name has been declared since the delete (someone
+     * re-created it manually), {@code declareTable} will revise that one to the restored
+     * schema. Entry-history is unaffected — the (now-orphaned) entries from the original
+     * table become visible again because the registry row is back.</p>
+     */
+    public Mono<VirtualTableView> rollbackTableDeletion(String tenantId, String tableName, JsonNode schema,
+                                                       String subject, String actorTrack, String requestId) {
+        return declare(tenantId, tableName, schema, subject, actorTrack, requestId);
+    }
+
     public Mono<Void> softDelete(String tenantId, String tableName, String recordKey,
                                  String subject, String actorTrack, String requestId) {
         Mono<Void> work = entries.findLatest(tenantId, tableName, recordKey)

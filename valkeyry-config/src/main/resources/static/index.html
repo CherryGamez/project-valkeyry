@@ -869,8 +869,13 @@ function humanTs(s) {
 }
 function isRollbackable(r) {
     if (!r) return false;
+    // Table-level DELETE_TABLE: rollback re-creates the schema from `beforeValue`. We don't
+    // need a recordKey for this op, and `beforeValue` is the schema snapshot itself.
+    if (r.operation === 'DELETE_TABLE') {
+        return r.beforeValue !== null && r.beforeValue !== undefined;
+    }
     if (!r.recordKey) return false;
-    // Only record-level ops with a non-null beforeValue.
+    // Record-level ops with a non-null beforeValue.
     if (!['INGEST_RECORD','DELETE_RECORD','ROLLBACK'].includes(r.operation)) return false;
     return r.beforeValue !== null && r.beforeValue !== undefined;
 }
