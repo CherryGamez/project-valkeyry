@@ -2846,7 +2846,12 @@ function copyCurlForCurrent() {
     let url, body;
     if (mode === 'batch') {
         url  = origin + apiBase() + '/tables/' + encodeURIComponent(name) + '/entries:batch';
-        body = document.getElementById('entry-batch').value;
+        // Wrap into { entries: [...] } so the copied cURL is actually accepted by the backend
+        // (BatchIngestRequest is a record with a non-empty `entries` list).
+        let entriesArr;
+        try { entriesArr = JSON.parse(document.getElementById('entry-batch').value || '[]'); }
+        catch { entriesArr = []; }
+        body = JSON.stringify({ entries: Array.isArray(entriesArr) ? entriesArr : [] });
     } else {
         url  = origin + apiBase() + '/tables/' + encodeURIComponent(name) + '/entries';
         const rk = document.getElementById('entry-key').value.trim() || 'sample-1';
@@ -3400,22 +3405,27 @@ async function ingestBatch(name) {
     }
 
     const url   = apiBase() + '/tables/' + encodeURIComponent(name) + '/entries:batch';
+    // Backend expects a wrapped payload: `BatchIngestRequest { @NotEmpty List<IngestRecordRequest> entries }`.
+    // Sending a bare array (as we used to) makes Jackson fail with `400 Bad Request` because
+    // it can't bind a JsonArray into the record's `entries` field.
+    const payload = { entries: arr };
     const t0    = performance.now();
     const res   = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify(arr)
+        body: JSON.stringify(payload)
     });
     const dtMs  = Math.round(performance.now() - t0);
     const text  = await res.text();
     let respJson;
     try { respJson = JSON.parse(text); } catch { respJson = text; }
-    showLiveResponse('POST', url, arr, res, respJson, dtMs);
+    showLiveResponse('POST', url, payload, res, respJson, dtMs);
 
     if (res.ok) {
         document.getElementById('entry-error').classList.add('hidden');
-        const summary = Array.isArray(respJson)
-            ? `Batch accepted — ${respJson.length} record(s)`
+        // Backend response shape: { total, inserted, duplicates, views: [...] }
+        const summary = (respJson && typeof respJson === 'object' && 'inserted' in respJson)
+            ? `Batch accepted — ${respJson.inserted} inserted, ${respJson.duplicates || 0} duplicate(s)`
             : 'Batch accepted';
         toast(summary);
         loadEntries(name);

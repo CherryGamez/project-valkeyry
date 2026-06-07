@@ -821,3 +821,23 @@ configurations. Results from raw `curl -D -` against `/api/v1/tenants/demo-tenan
 Also ran the full module test suite — `mvn -pl valkeyry-config test` → 53 tests, 0 failures,
 including the new `SecurityConfigBasicAuthChallengeTest`.
 
+
+
+### 2026-02-07 — Fix: `400 Bad Request` on `/entries:batch` (frontend/backend payload mismatch)
+**Bug:** Submitting any batch through the Console returned
+`{"status":400,"error":"Bad Request","path":".../entries:batch"}` with no useful detail. The
+front-end JS sent the entries as a bare JSON array (`[…]`) but the controller binds the body
+into `BatchIngestRequest`, a record wrapping a `@NotEmpty List<IngestRecordRequest> entries`.
+Jackson couldn't deserialize a top-level array into that record → 400.
+
+**Fix:** `valkeyry-config/src/main/resources/static/index.html`
+- `ingestBatch()` now POSTs `{ entries: [...] }`.
+- `copyCurlForCurrent()` (the Batch-mode "Copy cURL" button) now also wraps the array, so the
+  copied snippet works against the real API.
+- Toast summary uses the correct response shape: `BatchIngestResponse { submitted, inserted,
+  duplicates, results }`.
+
+**Verified** against the real Java backend on `:8082`:
+- Bare array → `400` (the original symptom).
+- Wrapped `{entries:[…]}` against an existing table → `201` with body
+  `{"submitted":2,"inserted":2,"duplicates":0,"results":[…]}`.
