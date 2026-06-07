@@ -13,6 +13,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
@@ -20,6 +21,8 @@ import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.authentication.AuthenticationWebFilter;
+import org.springframework.security.web.server.authentication.HttpStatusServerEntryPoint;
+import org.springframework.security.web.server.authentication.ServerAuthenticationEntryPointFailureHandler;
 
 /**
  * Dual-track security:
@@ -43,6 +46,23 @@ import org.springframework.security.web.server.authentication.AuthenticationWebF
 @EnableConfigurationProperties({LdapProperties.class, ApiKeyProperties.class, AuthProperties.class})
 public class SecurityConfig {
 
+    /**
+     * Silent 401 failure handler — returns {@code 401 Unauthorized} <em>without</em> a
+     * {@code WWW-Authenticate: Basic} challenge header.
+     *
+     * <p>The default failure handler installed by {@link AuthenticationWebFilter} is
+     * {@code ServerAuthenticationEntryPointFailureHandler(HttpBasicServerAuthenticationEntryPoint)},
+     * which emits {@code WWW-Authenticate: Basic realm="Realm"} on bad credentials. Browsers
+     * intercept that header on XHR/fetch responses and pop a native username/password modal,
+     * stealing the 401 from the JS layer — including the SPA's own retry/re-login logic.</p>
+     *
+     * <p>Both Track-2 filters (API-key and optional LDAP basic) are explicitly opt-in via headers
+     * the JS console sends; when those headers contain bad credentials we want a clean 401 the
+     * SPA can handle (clear token, redirect to /login), not a browser-level prompt.</p>
+     */
+    private static final ServerAuthenticationEntryPointFailureHandler SILENT_401 =
+            new ServerAuthenticationEntryPointFailureHandler(new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED));
+
     @Bean
     public SecurityWebFilterChain valkeyrySecurityWebFilterChain(ServerHttpSecurity http,
                                                                  LdapProperties ldapProps,
@@ -51,6 +71,7 @@ public class SecurityConfig {
                                                                  ReactiveJwtDecoder jwtDecoder) {
         AuthenticationWebFilter apiKeyFilter = new AuthenticationWebFilter(new ApiKeyAuthenticationManager(apiKeyProps));
         apiKeyFilter.setServerAuthenticationConverter(new ApiKeyAuthenticationConverter());
+        apiKeyFilter.setAuthenticationFailureHandler(SILENT_401);
 
         http
             .csrf(ServerHttpSecurity.CsrfSpec::disable)
@@ -92,6 +113,7 @@ public class SecurityConfig {
         if (authProps.isLdapEnabled()) {
             AuthenticationWebFilter basicFilter = new AuthenticationWebFilter(new LdapBasicAuthenticationManager(ldapProps));
             basicFilter.setServerAuthenticationConverter(new LdapBasicAuthenticationConverter());
+            basicFilter.setAuthenticationFailureHandler(SILENT_401);
             http.addFilterAt(basicFilter, SecurityWebFiltersOrder.AUTHENTICATION);
         }
 

@@ -722,3 +722,27 @@ For the Emergent preview pod (no JVM), the Python mock now mirrors:
 - `valkeyry-config/src/main/java/io/valkeyry/config/security/local/{LocalJwtService,SafeBearerTokenAuthenticationConverter,CompositeReactiveJwtDecoder}.java`
 - `valkeyry-config/src/main/resources/static/{login,admin,tools,index}.html`, `assets/auth.js`
 - `backend/server.py` (mock parity)
+
+### 2026-02-07 — Fix: native Basic Auth prompt loop when switching to console
+**Bug:** After creating a tenant in the admin GUI and clicking **Console**, the user pressed
+**Connect** and entered something like `admin/admin` (mistaking the Token field for a password
+prompt). The HTMX call to `/api/v1/tenants/{id}/tables` failed with `401 Unauthorized` carrying
+`WWW-Authenticate: Basic realm="Realm"`. Browsers intercept that header on XHR/fetch responses
+and pop their native username/password modal, which then re-sends `Authorization: Basic …` to
+the same failing endpoint — looping forever.
+
+**Root cause:** `AuthenticationWebFilter`'s default `authenticationFailureHandler` is
+`ServerAuthenticationEntryPointFailureHandler(HttpBasicServerAuthenticationEntryPoint)`. Both
+Track-2 filters in `SecurityConfig` (API-key + optional LDAP basic) inherited this default and
+therefore advertised a Basic challenge on every failure — even though `httpBasic` is disabled
+on the chain.
+
+**Fix:** `valkeyry-config/src/main/java/io/valkeyry/config/security/SecurityConfig.java`
+- Added `SILENT_401 = ServerAuthenticationEntryPointFailureHandler(HttpStatusServerEntryPoint(401))`.
+- Wired it on both `apiKeyFilter` and (when mounted) `basicFilter`.
+- Result: bad API key / LDAP credentials now produce a plain 401 the SPA's `vk.fetch` handles
+  (clears token → redirects to `/login.html`). No browser modal.
+
+**Regression test:** `src/test/java/io/valkeyry/config/security/SecurityConfigBasicAuthChallengeTest.java`
+asserts the silent handler sets 401 and emits no `WWW-Authenticate` header.
+
