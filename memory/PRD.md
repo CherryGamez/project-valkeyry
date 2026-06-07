@@ -889,3 +889,47 @@ Fix in `valkeyry-config/src/main/java/io/valkeyry/config/service/AuditWebhookPub
 **Test:** `mvn -pl valkeyry-config test -Dtest='AuditWebhookPublisherTest,SecurityConfigBasicAuthChallengeTest'`
 → 6/6 pass.
 
+
+### 2026-02-07 — Feature: Tools auto-import + Delete-table action (GUI tested 11/11)
+**Tools auto-import** — `tools.html` now has an "Import into a tenant" panel that appears once
+a file converts successfully. The flow:
+1. **Tenant picker** populated via `GET /api/v1/admin/tenants` (admin) with `vk.tenants()`
+   fallback for non-admins (`loadTenantsIntoDropdown()`).
+2. **Schema inference** (`inferSchemaFromRows()`) — walks the converted rows, types each
+   column from observed JSON types (int/number/bool/string/null), emits a permissive
+   `additionalProperties: true` schema. User can tighten later in the Console.
+3. **Auto recordKey** (`deriveRecordKey()`) — prefers obvious ID-like columns
+   (`recordKey`/`id`/`key`/`sku`/`customerId`/`*Id`…), falls back to `<tableName>-<rowIndex>`.
+4. **Push** — declares the schema, then bulk-ingests via `:batch` per converted table; status
+   panel renders ✓/✗ per table with insert + duplicate counts and a "Open Console →" link.
+
+**Delete-table action** — `index.html` table header now ships `[data-testid=delete-table-btn]`
+(red pill button). `deleteTable(name)` uses a `prompt()`-typed-name guard before issuing
+`DELETE /api/v1/tenants/{tenantId}/tables/{name}`; wrong name or Cancel aborts safely. Toast
++ sidebar refresh on success.
+
+**Backend wiring**
+- `VirtualTableService#softDeleteTable()` — calls existing `registries.deactivateAll()` and
+  records a new `Operation.DELETE_TABLE` audit row inside a transactional boundary. Audit
+  webhooks therefore fan it out like any other change.
+- `VirtualTableController#deleteTable()` — new `DELETE /tables/{name}` endpoint, OpenAPI'd.
+- `ConfigAuditService.Operation` — added `DELETE_TABLE` enum value.
+- Python mock at `/app/backend/server.py` — added `DELETE /api/v1/tenants/{t}/tables/{name}`
+  + back-ported XLSX conversion using `openpyxl` so the preview matches Java parity (two
+  sheets → two `tables[]` entries — verified with `products.xlsx`).
+
+**Postman**
+- New request `4 · Virtual Tables → DELETE /tables/{name} (soft-delete whole table)`.
+
+**Tests**
+- `mvn -pl valkeyry-config test` → **53/53 pass** (existing + new code).
+- `testing_agent_v3_fork` iteration 4 → **11/11 GUI scenarios pass** end-to-end:
+  CSV / DMN / XLSX auto-import (XLSX now too, after the mock port), delete-table happy +
+  wrong-name + cancel paths, Connect-modal dropdown, no logout loop, entry-form Save, batch
+  ingest toast, admin tenant CRUD.
+
+**Open carryover items**
+- (unchanged) Phase-2 redesign question: per-tenant token field on Connect modal, API keys
+  managed in admin page. Still awaits user choice a/b/c.
+- `VALKEYRY_API_KEYS` parser uses `;` instead of `,` — still queued.
+

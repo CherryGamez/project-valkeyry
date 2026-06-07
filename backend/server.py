@@ -974,11 +974,48 @@ async def tools_convert_csv(req: Request, file: UploadFile = File(...)):
 @app.post("/api/v1/tools/convert/xlsx")
 async def tools_convert_xlsx(req: Request, file: UploadFile = File(...)):
     _require_auth(req)
-    # Mock-grade XLSX: we don't carry openpyxl/POI in the preview pod, so we just
-    # surface a 501 explaining how to test against the real Java backend.
-    raise HTTPException(status_code=501,
-        detail="XLSX conversion is implemented in the Java ToolsController; the Python mock "
-               "only proxies CSV and DMN. Run the Java backend to exercise XLSX.")
+    # Multi-sheet parser using openpyxl. Each sheet becomes one entry in `tables[]`, matching
+    # the Java ToolsController's contract so the UI behaves identically against either backend.
+    # First non-empty row is the header; remaining rows are emitted as {column → cell value}
+    # dicts. Cells with no value are dropped (Java treats `null` as "absent").
+    try:
+        from openpyxl import load_workbook  # type: ignore
+    except ModuleNotFoundError:
+        raise HTTPException(status_code=501,
+            detail="openpyxl is not installed in this preview pod. `pip install openpyxl` and restart.")
+    raw = await file.read()
+    try:
+        wb = load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse XLSX: {e}")
+    tables = []
+    for sheet in wb.worksheets:
+        rows_iter = sheet.iter_rows(values_only=True)
+        header = None
+        body = []
+        for row in rows_iter:
+            if header is None:
+                # Skip leading entirely-empty rows so that a workbook with a title row above the
+                # header still parses correctly. The first row with any non-None cell wins.
+                if all(c is None or str(c).strip() == "" for c in row):
+                    continue
+                header = [str(c).strip() if c is not None else f"col_{i+1}" for i, c in enumerate(row)]
+                continue
+            if all(c is None for c in row):
+                continue
+            data = {}
+            for i, col in enumerate(header):
+                v = row[i] if i < len(row) else None
+                if v is None:
+                    continue
+                # openpyxl returns datetime/date/bool/int/float/str — JSON-stringify the dates so
+                # the response shape stays plain JSON (no datetime objects leak into the body).
+                if hasattr(v, "isoformat"):
+                    v = v.isoformat()
+                data[col] = v
+            body.append(data)
+        tables.append({"tableName": sheet.title, "columns": header or [], "rows": body})
+    return {"source": "xlsx", "fileName": file.filename, "tables": tables}
 
 @app.post("/api/v1/tools/convert/dmn")
 async def tools_convert_dmn(req: Request, file: UploadFile = File(...)):
