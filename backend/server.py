@@ -420,16 +420,34 @@ def ingest(tenant_id: str, name: str, body: IngestEntryRequest):
                version=record_version, record_version=record_version)
     return entry
 
+class BatchIngestRequest(BaseModel):
+    # Matches Java `BatchIngestRequest { @NotEmpty List<IngestRecordRequest> entries }`.
+    # The front-end now sends `{ entries: [...] }`; we mirror that contract so the same JS
+    # works against this mock and the real Spring backend.
+    entries: List[IngestEntryRequest]
+
 @app.post("/api/v1/tenants/{tenant_id}/tables/{name}/entries:batch", status_code=201)
-def ingest_batch(tenant_id: str, name: str, body: List[IngestEntryRequest]):
-    out = []
-    for row in body:
+def ingest_batch(tenant_id: str, name: str, body: BatchIngestRequest):
+    results = []
+    inserted = 0
+    duplicates = 0
+    for row in body.entries:
         result = ingest(tenant_id, name, row)
         if isinstance(result, JSONResponse):
-            out.append(json.loads(result.body))
+            payload = json.loads(result.body)
+            results.append(payload)
+            if result.status_code == 409:
+                duplicates += 1
         else:
-            out.append(result)
-    return out
+            results.append(result)
+            inserted += 1
+    # Java shape: BatchIngestResponse { int submitted; int inserted; int duplicates; List<EntryView> results; }
+    return {
+        "submitted":  len(body.entries),
+        "inserted":   inserted,
+        "duplicates": duplicates,
+        "results":    results,
+    }
 
 @app.get("/api/v1/tenants/{tenant_id}/tables/{name}/entries")
 def list_entries(tenant_id: str, name: str,
