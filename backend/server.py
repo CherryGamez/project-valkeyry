@@ -380,6 +380,28 @@ def get_table(tenant_id: str, name: str):
     meta = t["tables"][name]
     return {"tableName": name, **meta}
 
+@app.delete("/api/v1/tenants/{tenant_id}/tables/{name}", status_code=204)
+def delete_table(tenant_id: str, name: str):
+    # Mirrors Java `VirtualTableService.softDeleteTable`: the registry row is removed but the
+    # entry-history map stays untouched (so a rollback could reconstitute the schema). The
+    # mock keeps things simple — we just pop the entries map so the next list_entries call
+    # returns 404, matching the production "table not found" behaviour for soft-deleted tables.
+    t = tenant(tenant_id)
+    if name not in t["tables"]:
+        raise HTTPException(status_code=404, detail=f"Table '{name}' not found")
+    schema = t["tables"][name].get("schema")
+    del t["tables"][name]
+    # Drop entries for this table so the Console sidebar stops showing stale row counts.
+    for key in list(t["entries"].keys()):
+        if key[0] == name:
+            del t["entries"][key]
+    for key in list(t.get("history", {}).keys()):
+        if key[0] == name:
+            del t["history"][key]
+    push_audit(tenant_id, op="DELETE_TABLE", table=name, record_key=None,
+               before={"schema": schema}, after=None, version=0, record_version=0)
+    # 204 — no body
+
 # ─────────── Entries ───────────
 
 class IngestEntryRequest(BaseModel):

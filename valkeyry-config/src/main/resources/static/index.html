@@ -1332,6 +1332,10 @@ async function selectTable(name) {
                       class="btn-secondary press text-[13px] px-4 py-2" title="Add/rename/remove fields — pushes a new schema version">✎ Edit schema</button>
               <button onclick="loadEntries('${escapeHtml(name)}')" data-testid="refresh-entries-btn"
                       class="btn-secondary press text-[13px] px-4 py-2">↻ Refresh</button>
+              <button onclick="deleteTable('${escapeHtml(name)}')" data-testid="delete-table-btn"
+                      class="press text-[13px] px-4 py-2 rounded-pill border"
+                      style="border-color:rgba(255,59,48,.35);color:#C0271E;background:#FFF5F5"
+                      title="Soft-delete this table — entries stay in audit history">🗑 Delete table</button>
           </div>
         </div>
         ${schema ? `<details class="mb-4"><summary class="text-[12px] text-ink-700 cursor-pointer hover:text-ios-blue">View JSON Schema</summary><pre class="json-box mt-2" data-testid="schema-display">${escapeHtml(JSON.stringify(schema, null, 2))}</pre></details>` : ''}
@@ -3505,6 +3509,35 @@ async function deleteEntry(recordKey) {
     } else {
         const err = await res.json().catch(() => ({}));
         toast(err.detail || ('Delete failed: ' + res.status), true);
+    }
+}
+
+// Soft-delete the whole table. Mirrors the backend's `softDeleteTable` flow: the table goes
+// from the active registry but the entries are preserved in history so a future rollback can
+// reconstitute it. Two-step confirmation because this hides everything under the table at
+// once — typo-the-name is cheap insurance against a "select-wrong-row + click" accident.
+async function deleteTable(name) {
+    const typed = prompt(
+        `Soft-delete table "${name}"?\n\n` +
+        `Type the table name to confirm — entry history is preserved (rollback re-creates it).`
+    );
+    if (typed !== name) return;
+    const res = await apiFetch(apiBase() + '/tables/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (res.status === 204) {
+        toast(`Table "${name}" deleted`);
+        window.__currentTable = null;
+        // Clear the entry editor and refresh the sidebar so the row vanishes.
+        const editor = document.getElementById('entry-editor-mount') || document.querySelector('main');
+        if (editor) {
+            const card = editor.querySelector('.ios-card');
+            if (card && card.querySelector('[data-testid="selected-table-name"]')) {
+                card.remove();
+            }
+        }
+        refreshSidebar();
+    } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.detail || `Delete failed: ${res.status}`, true);
     }
 }
 

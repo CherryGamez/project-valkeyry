@@ -73,6 +73,28 @@
       </div>
     </section>
 
+    <section class="card p-6" id="import-card" style="display:none">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div class="grow">
+          <h3 class="text-base font-semibold tracking-tight">Import into a tenant</h3>
+          <p class="text-xs text-gray-500 mt-1">
+            Declares each converted table in the chosen tenant and bulk-ingests every row.
+            Record keys are auto-derived (an <code class="font-mono">id</code>/<code class="font-mono">key</code>/<code class="font-mono">sku</code>/<code class="font-mono">recordKey</code> column wins, otherwise <code class="font-mono">&lt;table&gt;-&lt;n&gt;</code>).
+            Nothing else to fill in.
+          </p>
+        </div>
+        <div class="flex items-end gap-2">
+          <label class="grid gap-1.5">
+            <span class="block text-xs uppercase tracking-wide text-gray-500">Tenant</span>
+            <select id="import-tenant" data-testid="tools-import-tenant"
+                    class="border rounded-lg px-3 py-2 text-sm min-w-[14rem]"></select>
+          </label>
+          <button id="import-btn" data-testid="tools-import-btn" class="btn btn-primary">Import</button>
+        </div>
+      </div>
+      <div id="import-status" data-testid="tools-import-status" class="mt-4 text-sm" style="display:none"></div>
+    </section>
+
     <section class="card p-6" id="result-card" style="display:none">
       <div class="flex items-center justify-between mb-3">
         <div>
@@ -154,6 +176,7 @@ document.getElementById('convert').addEventListener('click', async () => {
     summary.textContent = 'Failed · ' + r.status + ' · ' + ms + ' ms';
     summary.className = 'text-xs text-red-600';
     result.textContent = await r.text();
+    document.getElementById('import-card').style.display = 'none';
     return;
   }
   const j = await r.json();
@@ -163,7 +186,160 @@ document.getElementById('convert').addEventListener('click', async () => {
   summary.className = 'text-xs text-gray-500';
   result.textContent = JSON.stringify(j, null, 2);
   result.__data = j;
+  // Surface the import panel only when there's something to push.
+  if ((j.tables||[]).length > 0 && rowCount > 0) {
+    document.getElementById('import-card').style.display = '';
+    await loadTenantsIntoDropdown();
+  }
 });
+
+// ─────────── Tenant dropdown + auto-import ───────────
+// `loadTenantsIntoDropdown` is best-effort: an admin gets the full list from
+// /api/v1/admin/tenants; a non-admin falls back to their JWT entitlements
+// (vk.tenants()). Either way every available tenant is rendered as a <option>.
+async function loadTenantsIntoDropdown() {
+    const sel = document.getElementById('import-tenant');
+    sel.innerHTML = '';
+    let tenants = [];
+    try {
+        const r = await vk.fetch('/api/v1/admin/tenants');
+        if (r.ok) tenants = (await r.json()).map(t => ({ id: t.id, label: t.name ? `${t.id} — ${t.name}` : t.id }));
+    } catch (_) {}
+    if (tenants.length === 0 && vk.tenants) {
+        tenants = vk.tenants().filter(t => t && t !== '*').map(t => ({ id: t, label: t }));
+    }
+    if (tenants.length === 0) {
+        sel.innerHTML = '<option value="">(no tenants available — ask an admin)</option>';
+        sel.disabled = true;
+        document.getElementById('import-btn').disabled = true;
+        return;
+    }
+    sel.disabled = false;
+    document.getElementById('import-btn').disabled = false;
+    tenants.forEach(({ id, label }) => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = label;
+        sel.appendChild(opt);
+    });
+}
+
+// Pick a sensible recordKey from a row object without asking the user.
+// Preference list mirrors the columns 90% of real exports actually carry; if none of those
+// match we synthesise `<tableName>-<rowIndex>` so the call still goes through.
+function deriveRecordKey(row, tableName, rowIndex) {
+    const preferred = ['recordKey', 'id', 'ID', 'Id', 'key', 'Key', 'sku', 'SKU',
+                       'customerId', 'orderId', 'productId', 'uuid', 'UUID'];
+    for (const k of preferred) {
+        if (row && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+            return String(row[k]).trim();
+        }
+    }
+    // Fallback: any column whose name ends in `Id` (case-insensitive).
+    for (const k of Object.keys(row || {})) {
+        if (/id$/i.test(k) && row[k] != null && String(row[k]).trim() !== '') {
+            return String(row[k]).trim();
+        }
+    }
+    return `${tableName}-${rowIndex + 1}`;
+}
+
+// Build a permissive JSON-Schema that accepts every row in the converted table. The Tools
+// converter doesn't ship a schema (it just normalises tabular data) — the simplest schema
+// that won't reject any row is `additionalProperties: true` with each detected column
+// typed as `string|number|boolean|null`. The user can tighten it later in the Console.
+function inferSchemaFromRows(table) {
+    const seen = new Map();   // column → Set<type>
+    for (const row of (table.rows || [])) {
+        for (const [col, val] of Object.entries(row || {})) {
+            if (!seen.has(col)) seen.set(col, new Set());
+            seen.get(col).add(typeOfJson(val));
+        }
+    }
+    const properties = {};
+    for (const [col, types] of seen.entries()) {
+        const arr = Array.from(types).filter(t => t !== 'null');
+        properties[col] = arr.length === 1 ? { type: arr[0] }
+                        : arr.length === 0 ? { type: 'string' }
+                        : { type: arr };       // multi-type union, JSON-Schema legal
+    }
+    return {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type:    'object',
+        properties,
+        additionalProperties: true
+    };
+}
+function typeOfJson(v) {
+    if (v === null) return 'null';
+    if (Array.isArray(v)) return 'array';
+    const t = typeof v;
+    if (t === 'number')  return Number.isInteger(v) ? 'integer' : 'number';
+    if (t === 'boolean') return 'boolean';
+    if (t === 'object')  return 'object';
+    return 'string';
+}
+
+document.getElementById('import-btn').addEventListener('click', async () => {
+    const result = document.getElementById('result');
+    const j = result && result.__data;
+    if (!j || !Array.isArray(j.tables) || j.tables.length === 0) {
+        alert('Nothing converted yet.'); return;
+    }
+    const tenantId = document.getElementById('import-tenant').value;
+    if (!tenantId) { alert('Pick a tenant.'); return; }
+    const status = document.getElementById('import-status');
+    status.style.display = '';
+    status.className = 'mt-4 text-sm text-gray-700';
+    status.innerHTML = `Importing into <code class="font-mono">${tenantId}</code>…`;
+
+    const log = [];
+    for (const table of j.tables) {
+        const tn = table.tableName;
+        try {
+            // 1. Declare schema (idempotent — backend revises if it already exists).
+            const declareRes = await vk.fetch(`/api/v1/tenants/${encodeURIComponent(tenantId)}/tables`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tableName: tn, schema: inferSchemaFromRows(table) })
+            });
+            if (!declareRes.ok && declareRes.status !== 409) {
+                const body = await declareRes.text();
+                log.push(`<div class="text-red-600">✗ <code>${tn}</code> · declare failed (${declareRes.status}) — ${escapeHtml(body).slice(0, 200)}</div>`);
+                continue;
+            }
+            // 2. Bulk ingest rows with auto-derived recordKeys.
+            const entries = (table.rows || []).map((row, i) => ({
+                recordKey: deriveRecordKey(row, tn, i),
+                data:      row
+            }));
+            if (entries.length === 0) {
+                log.push(`<div class="text-amber-600">○ <code>${tn}</code> · declared (0 rows)</div>`);
+                continue;
+            }
+            const ingestRes = await vk.fetch(
+                `/api/v1/tenants/${encodeURIComponent(tenantId)}/tables/${encodeURIComponent(tn)}/entries:batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entries })
+                });
+            const ingestBody = await ingestRes.json().catch(() => ({}));
+            if (ingestRes.ok) {
+                const inserted   = ingestBody.inserted   ?? entries.length;
+                const duplicates = ingestBody.duplicates ?? 0;
+                log.push(`<div class="text-green-700">✓ <code>${tn}</code> · ${inserted} inserted, ${duplicates} duplicate(s)</div>`);
+            } else {
+                log.push(`<div class="text-red-600">✗ <code>${tn}</code> · ingest failed (${ingestRes.status})</div>`);
+            }
+        } catch (e) {
+            log.push(`<div class="text-red-600">✗ <code>${tn}</code> · ${escapeHtml(e.message)}</div>`);
+        }
+    }
+    status.innerHTML = `<div class="space-y-1">${log.join('')}</div>`
+                     + `<a href="/" class="btn btn-soft mt-3" data-testid="tools-open-console-link">Open Console →</a>`;
+});
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 document.getElementById('copy-json').addEventListener('click', () => {
   navigator.clipboard.writeText(document.getElementById('result').textContent || '');

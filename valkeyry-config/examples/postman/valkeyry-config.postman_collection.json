@@ -220,6 +220,14 @@
             "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
             "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}/entries/{{recordKey}}", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}","entries","{{recordKey}}"] }
           }
+        },
+        {
+          "name": "DELETE /tables/{name} (soft-delete whole table)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-API-Key", "value": "{{apiKey}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/tenants/{{tenant}}/tables/{{tableName}}", "host": ["{{baseUrl}}"], "path": ["api","v1","tenants","{{tenant}}","tables","{{tableName}}"] }
+          }
         }
       ]
     },

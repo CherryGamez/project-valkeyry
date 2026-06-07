@@ -201,6 +201,30 @@ public class VirtualTableService {
      *
      * <p>Failing with {@link VirtualTableNotFoundException} when no head exists for that key.</p>
      */
+    /**
+     * Soft-deletes every version of a table.
+     *
+     * <p>Uses {@link VirtualTableRegistryRepository#deactivateAll(String, String)} to flip the
+     * {@code is_active} flag on every registry row for the table. Existing entries stay in
+     * place (the entry table is not touched) — they're effectively orphaned. A `DELETE_TABLE`
+     * audit row is recorded so the action is reversible from the timeline.</p>
+     */
+    public Mono<Void> softDeleteTable(String tenantId, String tableName,
+                                      String subject, String actorTrack, String requestId) {
+        Mono<Void> work = registries.findActive(tenantId, tableName)
+                .switchIfEmpty(Mono.error(new VirtualTableNotFoundException(tenantId, tableName)))
+                .flatMap(active -> {
+                    JsonNode before = parseSchemaSafely(active.getSchemaDefinition());
+                    return registries.deactivateAll(tenantId, tableName)
+                            .then(audit.record(tenantId, tableName,
+                                    ConfigAuditService.Operation.DELETE_TABLE,
+                                    null, before, mapper.nullNode(),
+                                    subject, actorTrack, requestId));
+                })
+                .then();
+        return tx.transactional(work);
+    }
+
     public Mono<Void> softDelete(String tenantId, String tableName, String recordKey,
                                  String subject, String actorTrack, String requestId) {
         Mono<Void> work = entries.findLatest(tenantId, tableName, recordKey)

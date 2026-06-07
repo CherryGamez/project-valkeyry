@@ -1,0 +1,37 @@
+{
+  "summary": "Completed full GUI walkthrough of the new TOOLS auto-import + DELETE-TABLE features plus regression of Connect-modal datalist, entry-form save, batch ingest, admin tenant CRUD, and the logout-loop fix. 10 of 11 review-request scenarios PASS end-to-end against the preview pod; the lone failure is XLSX conversion which is intentionally NOT implemented in the Python mock (server returns HTTP 501 with the message 'XLSX conversion is implemented in the Java ToolsController; the Python mock only proxies CSV and DMN. Run the Java backend to exercise…') — this is a documented mock limitation, not a frontend defect. All assertions captured below were verified both in the UI and via direct backend GET probes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/v1/tools/convert (kind=xlsx)", "issue": "Python mock returns 501 by design — XLSX conversion lives in the Java ToolsController. Frontend handles the failure gracefully (shows 'Failed · 501' in the Conversion result panel)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "all static pages", "issues": ["cdn.tailwindcss.com still loaded at runtime — Tailwind itself warns 'should not be used in production'. Acceptable for preview; carry-over for the Java build pipeline (already noted in iter 1/2)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_4.json"
+  ],
+  "action_items": [
+    "Document in tools.html or PRD that XLSX import requires the Java backend; Python mock supports CSV + DMN only. Optionally, the frontend could detect mock + .xlsx and surface a friendlier 'XLSX requires Java backend' notice instead of the raw 501 detail.",
+    "Carry-over from earlier iterations: replace cdn.tailwindcss.com with the Tailwind CLI build before production."
+  ],
+  "critical_code_review_comments": [
+    "tools.html: when kind dropdown is .xlsx and the user is hitting the Python mock, surface a friendlier message — currently the user sees a raw JSON {detail: 'XLSX conversion is implemented in the Java ToolsController...'} which is fine for an engineer but rough for a PM demo.",
+    "index.html: deleteTable() uses window.prompt() — works perfectly in headless Chrome via page.on('dialog'), but for accessibility and styling consistency consider migrating to the existing dialog/modal pattern used by the Connect modal in a follow-up.",
+    "index.html: when a stale tenant-conn (e.g. not-a-tenant + bearer nope) is saved, the mock returns 200 for GET /tables (no entries), so the UI silently shows 'No tables yet. Declare one to begin.' The user could be confused about why their data 'disappeared'. Consider a banner like 'Connected to <tenant> — 0 tables visible. Wrong tenant?' to aid recovery.",
+    "Confirmed: vk.clearAuth() in auth.js now clears vk.tenant/vk.auth.mode/vk.auth.token in addition to the JWT — verified by reading LS after a successful logout-then-relogin cycle in earlier rounds. In this iteration the mock never issued a 401, so clearAuth was not triggered (LS retained the user-typed not-a-tenant/bearer/nope, which is correct behaviour since the user explicitly Saved them)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only iteration)", "frontend": "10/11 review-request scenarios (XLSX intentionally unsupported by mock)"},
+  "test_credentials": "admin/admin (from /app/memory/test_credentials.md). Tenant: demo-tenant, API key: plugin-test-key. Created qa-tenant (QA Tenant) during the admin CRUD test.",
+  "seed_data_creation": "Via TOOLS auto-import: customers (8 rows, recordKeys C-1001…C-1008) and 'Loan Approval' (6 rows) imported into demo-tenant. customers was subsequently soft-deleted as part of the delete-table test. Batch test added bu1/bu2 to the users table (GET confirms both 200). Admin created tenant qa-tenant.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Detailed evidence captured this iteration: (1) CSV import returns '✓ customers · 8 inserted, 0 duplicate(s)' and the [data-testid=tools-open-console-link] appears post-import. (2) DMN import returns '✓ Loan Approval · 6 inserted, 0 duplicate(s)'. (3) XLSX returns Conversion result Failed · 501 from the Python mock — Java backend handles it. (4) Auto-recordKey logic works: customers entries are keyed C-1001…C-1008 (from the customerId column), verified by reading the entries grid AND by GET /api/v1/tenants/demo-tenant/tables/customers/entries. (5) auth-tenant-options datalist had 1 option ('demo-tenant') initially, then 2 after qa-tenant was created via admin. (6) [data-testid=delete-table-btn] is rendered as a red 'Delete table' button in the table header card; clicking opens a window.prompt('Soft-delete table \"customers\"? Type the table name to confirm…'). Typing wrong name → aborted, customers stays. Cancel → aborted, customers stays. Typing 'customers' → toast 'Table \"customers\" deleted', sidebar item disappears, GET /tables no longer lists it. (7) Entry form save: backend GET /entries/reg-test1 returns data:{email:'test@gmx.com', fullName:'Test', role:'viewer', active:false, tags:[]} — email is correctly persisted (the iter-1 bug is fixed). (8) Batch toast 'Batch accepted — 2 inserted, 0 duplicate(s)'; backend GET /entries/bu1 and /bu2 both 200. (9) Admin: [data-testid=tenant-save-btn] creates qa-tenant; refresh of tools page shows it in [data-testid=tools-import-tenant]. (10) Logout-loop regression: typing not-a-tenant + bearer 'nope' + Save did NOT redirect to login.html (mock returns 200 for empty tables list) and the page stayed at / with 'No tables yet. Declare one to begin.' — no loop. LS keys (vk.tenant=not-a-tenant, vk.auth.mode=bearer, vk.auth.token=nope) are present because the user explicitly Saved them, which is correct.",
+  "rca_of_the_issue": "Only one 'issue' encountered: XLSX returns 501. RCA: Python FastAPI mock at /app/backend/server.py implements /tools/convert for csv + dmn only, returns 501 for xlsx — this is documented in the response detail and is by design (Java ToolsController handles the XLSX→JSON conversion using Apache POI). Reproduction: POST /api/v1/tools/convert with kind=xlsx + multipart file → 501 with detail 'XLSX conversion is implemented in the Java ToolsController; the Python mock only proxies CSV and DMN. Run the Java backend to exercise…'. Mitigation: (a) document the limitation in tools.html (e.g. small note 'XLSX requires the Java backend — preview supports CSV + DMN'), or (b) port the openpyxl-based conversion into the Python mock to keep parity. The production Java backend already passes mvn test + Newman per the user's note, so end-users never hit this in production."
+}

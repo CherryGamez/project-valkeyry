@@ -96,6 +96,25 @@ public class VirtualTableController {
         return guard.check(auth, tenantId).then(service.getActive(tenantId, tableName));
     }
 
+    @DeleteMapping("/tables/{name}")
+    @Operation(summary = "Soft-delete an entire virtual table",
+               description = "Deactivates every version of the named table. Entries are not physically removed — history stays queryable via the audit ledger and the action is reversible from the audit timeline. Requires `ROLE_VALKEYRY_WRITER` (or admin).")
+    @ApiResponses({
+        @ApiResponse(responseCode = "204", description = "Table soft-deleted"),
+        @ApiResponse(responseCode = "404", description = "No active table by that name"),
+        @ApiResponse(responseCode = "403", description = "Caller lacks ROLE_VALKEYRY_WRITER")
+    })
+    public Mono<ResponseEntity<Void>> deleteTable(@PathVariable String tenantId,
+                                                  @PathVariable("name") String tableName,
+                                                  Authentication auth,
+                                                  ServerWebExchange exchange) {
+        String track = AuthTrack.of(auth).name();
+        String requestId = exchange.getRequest().getId();
+        return guard.check(auth, tenantId)
+                .then(service.softDeleteTable(tenantId, tableName, auth.getName(), track, requestId))
+                .thenReturn(ResponseEntity.noContent().<Void>build());
+    }
+
     // ---------------- Entries ----------------
 
     @PostMapping("/tables/{name}/entries")
