@@ -1046,3 +1046,48 @@ cd ../../gradle && gradle :01-flat-feature-flags:valkeyryConfigPush
 ```
 
 Override the mock backend with env vars: `VALKEYRY_ENDPOINT`, `VALKEYRY_TENANT`, `VALKEYRY_API_KEY`.
+
+
+---
+
+## 2026-02-07 (follow-up) — Real-server validation
+
+Plugin verified end-to-end against an actual running `valkeyry-config` Spring
+Boot instance backed by Postgres 15 (not a mock).
+
+### Setup performed
+- Installed Postgres 15 from apt, created `valkeyry`/`valkeyry` role and
+  `valkeyry_config` database with a `valkeyry_config` schema.
+- Built the Spring Boot fat-jar:
+  `cd valkeyry-config && mvn package -DskipTests` →
+  `target/valkeyry-config-1.0.0-SNAPSHOT.jar` (77 MB).
+- Booted the app on `127.0.0.1:8081` with
+  `VALKEYRY_API_KEYS=plugin-test-key:demo-tenant`.
+- Flyway applied 4 migrations to the empty schema. Default admin seeded.
+
+### Validation results — all 8 example projects work
+- **Maven examples** (4 sub-modules) pushed via
+  `mvn valkeyry-config:push` against the real server:
+  - `01-flat-feature-flags` → table `feature_flags` (cfg-v1) + 3 entries
+  - `02-inline-product-catalog` → table `products` (cfg-v1) + 2 entries
+  - `03-multi-table` → 3 tables, 5 entries
+  - `04-env-driven` → table `routing_rules` (cfg-v1) + 1 entry
+- **Gradle examples** (4 sub-projects) pushed via
+  `gradle :NN-…:valkeyryConfigPush` — same tables/entries, all show as
+  duplicates (server-side `payloadHash` dedup working) and bump
+  `configVersion` on schema re-declare.
+- **Server-side state**: 5 tables, **27 audit entries**
+  (`DECLARE_TABLE`, `INGEST_RECORD`, `REVISE_TABLE`), every entry
+  attributed to `actorTrack=API_KEY`, `actor=api-key:plugin-t…`.
+
+### New script
+- `examples/validate_real_server.sh` — boots the fat-jar, waits for the API,
+  runs every Maven + Gradle example, then asserts the server-side tables
+  and audit ledger. Re-runnable any time the user wants the full integration
+  sweep.
+
+### Conclusion
+The plugin's wire format, auth, fingerprint/idempotency contract, and schema
+versioning all behave identically against the mock **and** the real server.
+The earlier Jackson / envelope / manifest-dir bug-fixes from the previous
+finish step are confirmed to work in production.

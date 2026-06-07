@@ -17,6 +17,24 @@ All examples target the **mock preview backend** (`demo-tenant`,
 `X-API-Key: plugin-test-key`, `http://localhost:8081`) by default; override
 with env vars to point at a real server.
 
+## Validated against the real server
+
+Both the mock-backed regression suite (`test_examples.py`) **and** an end-to-end
+flow against a real `valkeyry-config` Spring Boot instance + Postgres are
+captured in [`validate_real_server.sh`](./validate_real_server.sh). The
+script:
+
+1. boots the fat-jar at `valkeyry-config/target/valkeyry-config-1.0.0-SNAPSHOT.jar`,
+2. waits for the API to come up,
+3. runs every Maven and Gradle example against it,
+4. asserts the tables, schema versions and audit ledger entries appeared.
+
+Re-run any time with:
+
+```bash
+./examples/validate_real_server.sh
+```
+
 ## Runnable wrapper projects
 
 |                                                | Build tool | Cross-platform                                       |
