@@ -1,0 +1,13 @@
+// Example 1 — Flat feature flags (file-based schema).
+//
+// Run from the parent gradle/ folder:
+//     gradle :01-flat-feature-flags:valkeyryConfigPush
+//
+// Override the mock backend with real credentials:
+//     VALKEYRY_ENDPOINT=https://valkeyry-config.acme.io \
+//     VALKEYRY_API_KEY=$(vault kv get -field=key secret/valkeyry/ci) \
+//     gradle :01-flat-feature-flags:valkeyryConfigPush
+
+valkeyryConfig {
+    manifestPath = file('../../01-flat-feature-flags/valkeyry-config.yaml')
+}

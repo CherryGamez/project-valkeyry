@@ -44,6 +44,13 @@ public final class PluginEngine {
                 URI.create(manifest.getEndpoint()),
                 AuthStrategy.fromManifest(manifest.getAuth()));
 
+        // Schema files and entry globs in the manifest are resolved relative to the manifest's
+        // own parent directory. This lets a build (e.g. examples/maven/01-flag/pom.xml) point at
+        // a manifest in a sibling folder (../../01-flag/valkeyry-config.yaml) and still pick up
+        // the data/ and schemas/ that live next to that YAML.
+        Path manifestDir = ctx.manifestPath().toAbsolutePath().getParent();
+        if (manifestDir == null) manifestDir = ctx.projectBaseDir();
+
         int submitted = 0, inserted = 0, duplicates = 0;
         List<String> declared = new ArrayList<>();
 
@@ -51,20 +58,32 @@ public final class PluginEngine {
             ctx.log().info("· " + table.getName() + ": declaring schema…");
             JsonNode schema = table.hasInlineSchema()
                     ? MAPPER.valueToTree(table.getSchemaInline())
-                    : MAPPER.readTree(ctx.projectBaseDir().resolve(table.getSchema()).toFile());
+                    : MAPPER.readTree(manifestDir.resolve(table.getSchema()).toFile());
             ValkeyryConfigClient.DeclareResult decl = client.declareTable(manifest.getTenant(), table.getName(), schema);
             ctx.log().info("  → registered id=" + decl.id() + " configVersion=" + decl.configVersion());
             declared.add(table.getName());
 
-            List<Path> entryFiles = expandGlob(ctx.projectBaseDir(), table.getEntries());
+            List<Path> entryFiles = expandGlob(manifestDir, table.getEntries());
             if (entryFiles.isEmpty()) {
                 ctx.log().warn("  no entry files matched " + table.getEntries());
                 continue;
             }
             List<ValkeyryConfigClient.EntryRequest> requests = new ArrayList<>();
             for (Path entryFile : entryFiles) {
-                JsonNode payload = MAPPER.readTree(entryFile.toFile());
-                String recordKey = readRecordKey(payload, entryFile);
+                JsonNode raw = MAPPER.readTree(entryFile.toFile());
+                // Two supported entry shapes:
+                //   (a) Envelope: { "recordKey": "...", "data": { ...payload... } }  ← preferred,
+                //                                                                       used by all examples.
+                //   (b) Flat:     { "id": "...", ...payload... }  ← legacy; recordKey from `id` or filename.
+                JsonNode payload;
+                String recordKey;
+                if (isEnvelope(raw)) {
+                    recordKey = raw.path("recordKey").asText();
+                    payload = raw.path("data");
+                } else {
+                    recordKey = readRecordKey(raw, entryFile);
+                    payload = raw;
+                }
                 // Fingerprint is computed but not sent — the server will recompute identically.
                 // Local computation surfaces obvious bugs (e.g. mis-encoded files) before the wire trip.
                 PayloadFingerprint.sha256(payload);
@@ -86,6 +105,18 @@ public final class PluginEngine {
         String filename = file.getFileName().toString();
         int dot = filename.lastIndexOf('.');
         return dot > 0 ? filename.substring(0, dot) : filename;
+    }
+
+    /**
+     * @return {@code true} if the entry JSON looks like {@code { "recordKey": "...", "data": {...} }}.
+     * This envelope is the canonical shape used by every example under {@code examples/}.
+     */
+    private static boolean isEnvelope(JsonNode node) {
+        if (node == null || !node.isObject()) return false;
+        JsonNode recordKey = node.get("recordKey");
+        JsonNode data = node.get("data");
+        return recordKey != null && recordKey.isTextual() && !recordKey.asText().isBlank()
+                && data != null && data.isObject();
     }
 
     private static List<Path> expandGlob(Path baseDir, String pattern) throws IOException {

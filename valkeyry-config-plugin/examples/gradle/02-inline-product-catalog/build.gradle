@@ -1,0 +1,4 @@
+// Example 2 — Inline product catalog (schemaInline:).
+valkeyryConfig {
+    manifestPath = file('../../02-inline-product-catalog/valkeyry-config.yaml')
+}

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Aggregator POM for the four runnable Maven examples that exercise the
+  valkeyry-config-maven-plugin against each canonical manifest under
+  examples/. Build/run any single example with:
+
+      cd examples/maven/01-flat-feature-flags
+      mvn validate                                              # offline check
+      mvn io.valkeyry:valkeyry-config-maven-plugin:1.0.0-SNAPSHOT:push
+
+  …or build the whole aggregator (no push goal is bound to a default lifecycle
+  phase here, so the connection is only attempted when you invoke the goal
+  explicitly).
+
+  PREREQUISITE: the parent plugin project must be installed locally first:
+
+      cd /path/to/valkeyry-config-plugin
+      mvn clean install -DskipTests
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.valkeyry.examples</groupId>
+    <artifactId>valkeyry-config-maven-examples</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>Valkeyry Config :: Maven Examples (Aggregator)</name>
+    <description>Runnable Maven projects that demo the valkeyry-config-maven-plugin against every example manifest. Cross-platform (Windows / macOS / Linux).</description>
+
+    <modules>
+        <module>01-flat-feature-flags</module>
+        <module>02-inline-product-catalog</module>
+        <module>03-multi-table</module>
+        <module>04-env-driven</module>
+    </modules>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <valkeyry.plugin.version>1.0.0-SNAPSHOT</valkeyry.plugin.version>
+    </properties>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>io.valkeyry</groupId>
+                    <artifactId>valkeyry-config-maven-plugin</artifactId>
+                    <version>${valkeyry.plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

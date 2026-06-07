@@ -969,3 +969,80 @@ Fix (full stack):
   declare → ingest(2) → DELETE → audit returns op=DELETE_TABLE → POST /rollback → table
   comes back with the same schema → all status codes match (201/204/201/200).
 
+
+---
+
+## 2026-02-07 — `valkeyry-config-plugin` examples + integration fixes
+
+### Original ask
+> Stick to main/valkeyry-ecosystem/valkeyry-config-plugin and make sure the
+> plugins are working fine connecting to valkeyry-config and all the functions
+> are working. Add example projects for both Maven and Gradle in an `examples`
+> folder so they can be tested on Windows and Mac.
+
+### Production bugs found and fixed
+1. **Jackson runtime crash** — `plugin-core/pom.xml` declared
+   `jackson-databind:2.18.0` but the reactor parent imports
+   `spring-boot-dependencies` which dependency-manages `jackson-core` to
+   `2.17.2`. At runtime the plugin threw
+   `NoSuchMethodError 'ParserMinimalBase.<init>(StreamReadConstraints)'`.
+   Fixed by adding a `<dependencyManagement>` override + explicit
+   `jackson-core` / `jackson-annotations` dependencies in `plugin-core/pom.xml`.
+2. **Entry envelope ignored** — `PluginEngine.readRecordKey()` only looked at
+   the JSON top-level `id` field. Every example file uses the documented
+   envelope shape `{ "recordKey": "...", "data": { … } }`, so every entry was
+   being pushed under the *file-name* as recordKey and the entire envelope
+   was the payload. `PluginEngine.run()` now detects the envelope and unwraps
+   it; the legacy flat shape still works.
+3. **Manifest-relative path resolution** — schemas (`schema:`) and entry globs
+   (`entries:`) now resolve relative to the **manifest's own parent dir**
+   instead of `projectBaseDir`. Lets a build at
+   `examples/maven/01-flag/pom.xml` reference a YAML in a sibling shared
+   folder (`../../01-flag/valkeyry-config.yaml`) and still pick up the data.
+
+### Test fix
+- `PluginEngineE2ETest` recorded HTTP headers in a `HashMap` and queried
+  `X-API-Key` directly; the JDK `HttpServer` canonicalises header names to
+  `X-Api-Key`. Switched to `TreeMap(CASE_INSENSITIVE_ORDER)`.
+
+### New runnable example projects
+```
+valkeyry-config-plugin/examples/
+├── 01-flat-feature-flags/    │ existing — canonical YAML + data/schema
+├── 02-inline-product-catalog/│
+├── 03-multi-table/           │
+├── 04-env-driven/            │
+├── README.md                 │ updated — points at the two wrapper folders
+├── mock_valkeyry_config.py   │ NEW — offline mock for examples + tests
+├── test_examples.py          │ NEW — e2e regression (Maven + Gradle × 4)
+├── maven/                    │ NEW — aggregator POM + 4 sub-projects
+│   ├── pom.xml               │
+│   ├── README.md             │ cross-platform run instructions
+│   └── {01..04}/pom.xml      │ each consumes the canonical YAML via ../../
+└── gradle/                   │ NEW — multi-project Gradle build
+    ├── settings.gradle       │
+    ├── build.gradle          │ resolves plugin from mavenLocal()
+    ├── README.md             │
+    └── {01..04}/build.gradle │
+```
+
+### Verified end-to-end
+- `mvn clean install` on `/app/valkeyry-config-plugin` → **13/13 tests pass**.
+- `python3 examples/test_examples.py` (spawns the mock per example) →
+  **all 4 Maven sub-tests + all 4 Gradle sub-tests pass**.
+- Idempotency demonstrated: re-running an example with a populated mock
+  returns `submitted=N inserted=0 duplicates=N`.
+
+### How to run on Windows / Mac (no wrappers — user uses their own tools)
+```bash
+# one-time
+cd valkeyry-config-plugin && mvn clean install -DskipTests
+
+# Maven
+cd examples/maven/01-flat-feature-flags && mvn valkeyry-config:push
+
+# Gradle
+cd ../../gradle && gradle :01-flat-feature-flags:valkeyryConfigPush
+```
+
+Override the mock backend with env vars: `VALKEYRY_ENDPOINT`, `VALKEYRY_TENANT`, `VALKEYRY_API_KEY`.

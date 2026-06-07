@@ -1,0 +1,42 @@
+// Root build for the Gradle examples.
+//
+// PREREQUISITE: install the parent plugin into your local ~/.m2 first:
+//
+//     cd /path/to/valkeyry-config-plugin
+//     mvn clean install -DskipTests
+//
+// We resolve the Gradle plugin and its `plugin-core` runtime out of the
+// local Maven repository (mavenLocal()). On CI you would publish to your
+// own Artifactory / Nexus and replace the `mavenLocal()` block below.
+
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+    }
+    dependencies {
+        // Pull the Gradle plugin and its transitive core jar out of ~/.m2
+        classpath 'io.valkeyry:valkeyry-config-gradle-plugin:1.0.0-SNAPSHOT'
+        classpath 'io.valkeyry:valkeyry-config-plugin-core:1.0.0-SNAPSHOT'
+    }
+}
+
+// Apply the same plugin to every sub-project. Each sub-project configures its
+// own `valkeyryConfig { manifestPath = ... }` extension to point at the
+// canonical YAML in the sibling shared folder.
+subprojects {
+    apply plugin: 'io.valkeyry.config'
+
+    repositories {
+        mavenLocal()
+        mavenCentral()
+    }
+}
+
+// Convenience: `gradle valkeyryConfigPush` from the root runs the task in
+// every sub-project.
+tasks.register('valkeyryConfigPush') {
+    group = 'valkeyry'
+    description = 'Run valkeyryConfigPush across every example sub-project.'
+    dependsOn subprojects.collect { it.path + ':valkeyryConfigPush' }
+}

@@ -1,0 +1,4 @@
+// Example 3 — Multi-table manifest (file + inline schemas, three tables).
+valkeyryConfig {
+    manifestPath = file('../../03-multi-table/valkeyry-config.yaml')
+}

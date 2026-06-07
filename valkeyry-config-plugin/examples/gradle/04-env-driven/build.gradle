@@ -1,0 +1,7 @@
+// Example 4 — env-driven (CI shape).
+//
+// All credentials & endpoint come from environment variables; defaults in the
+// YAML's ${VAR:default} blocks keep the example runnable offline.
+valkeyryConfig {
+    manifestPath = file('../../04-env-driven/valkeyry-config.yaml')
+}

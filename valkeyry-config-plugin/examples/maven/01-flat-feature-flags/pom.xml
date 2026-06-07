@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example 1 — Flat feature flags (file-based schema).
+
+  Consumes the shared manifest under ../../01-flat-feature-flags/. Schema and
+  entry globs in the YAML resolve relative to the manifest's own directory, so
+  ../../01-flat-feature-flags/schemas/feature_flags.schema.json and
+  ../../01-flat-feature-flags/data/*.json are picked up automatically.
+
+  Run (Windows / macOS / Linux — identical command):
+
+      cd examples/maven/01-flat-feature-flags
+      mvn io.valkeyry:valkeyry-config-maven-plugin:push
+
+  Or, if the plugin is declared as below, simply:
+
+      mvn valkeyry-config:push
+
+  Override the backend at the command line:
+
+      mvn valkeyry-config:push ^
+        -Dvalkeyry.manifest=../../01-flat-feature-flags/valkeyry-config.yaml ^
+        -DVALKEYRY_ENDPOINT=http://my-server:8081 ^
+        -DVALKEYRY_API_KEY=my-real-key
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.valkeyry.examples</groupId>
+        <artifactId>valkeyry-config-maven-examples</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>valkeyry-config-maven-example-01-flat-feature-flags</artifactId>
+    <packaging>pom</packaging>
+    <name>Valkeyry Config :: Maven Example 1 :: Flat Feature Flags</name>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>io.valkeyry</groupId>
+                <artifactId>valkeyry-config-maven-plugin</artifactId>
+                <configuration>
+                    <!-- Point at the canonical YAML in the sibling shared folder. -->
+                    <manifest>../../01-flat-feature-flags/valkeyry-config.yaml</manifest>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>push-feature-flags</id>
+                        <goals>
+                            <goal>push</goal>
+                        </goals>
+                        <!--
+                          We deliberately leave the default `deploy` phase binding in place. To run
+                          the push without going through deploy, invoke the goal directly:
+                              mvn valkeyry-config:push
+                        -->
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

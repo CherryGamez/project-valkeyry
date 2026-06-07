@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example 4 — env-driven (CI shape). All credentials & the endpoint come from
+  environment variables; the YAML's ${VAR:default} blocks fall back to the
+  mock preview backend so the example still runs offline.
+
+      export VALKEYRY_ENDPOINT=https://valkeyry-config.acme.io
+      export VALKEYRY_TENANT=acme-prod
+      export VALKEYRY_API_KEY=...
+      mvn valkeyry-config:push
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.valkeyry.examples</groupId>
+        <artifactId>valkeyry-config-maven-examples</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>valkeyry-config-maven-example-04-env-driven</artifactId>
+    <packaging>pom</packaging>
+    <name>Valkeyry Config :: Maven Example 4 :: Env-Driven (CI)</name>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>io.valkeyry</groupId>
+                <artifactId>valkeyry-config-maven-plugin</artifactId>
+                <configuration>
+                    <manifest>../../04-env-driven/valkeyry-config.yaml</manifest>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>push-routing-rules</id>
+                        <goals>
+                            <goal>push</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

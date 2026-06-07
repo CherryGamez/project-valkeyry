@@ -1,0 +1,16 @@
+// Gradle settings for the four runnable examples that exercise the
+// valkeyry-config-gradle-plugin against each canonical manifest under examples/.
+//
+// Build/run any single example with:
+//     cd examples/gradle
+//     gradle :01-flat-feature-flags:valkeyryConfigPush
+//
+// Or run all four:
+//     gradle valkeyryConfigPush
+
+rootProject.name = 'valkeyry-config-gradle-examples'
+
+include '01-flat-feature-flags'
+include '02-inline-product-catalog'
+include '03-multi-table'
+include '04-env-driven'

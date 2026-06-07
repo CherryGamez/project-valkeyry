@@ -323,7 +323,8 @@ class PluginEngineE2ETest {
         String method;
         String path;
         String body;
-        final java.util.Map<String, String> headers = new java.util.HashMap<>();
+        /** Case-insensitive — JDK's HttpServer canonicalises header names ("X-API-Key" → "X-Api-Key"). */
+        final java.util.Map<String, String> headers = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     }
 
     // ─────────────────────────────────────────────────────────────────────
