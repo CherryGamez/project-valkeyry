@@ -7,6 +7,12 @@
  */
 (function () {
   const STORAGE_KEY = 'vk.auth.v1';
+  // Per-tenant connection (set from the Console's "Connect" modal). When a JWT 401
+  // clears the session we MUST clear these too — otherwise the next successful login
+  // immediately fires another tenant API call with the old (now-orphaned, possibly
+  // bogus) X-API-Key / bearer, gets 401 again, and ejects the user straight back to
+  // /login.html. Keep these in sync with the LS_KEYS map in index.html.
+  const TENANT_KEYS = ['vk.tenant', 'vk.auth.mode', 'vk.auth.token'];
 
   const vk = (window.vk = window.vk || {});
 
@@ -15,7 +21,11 @@
     catch (e) { return null; }
   };
   vk.setAuth = function (auth) { localStorage.setItem(STORAGE_KEY, JSON.stringify(auth)); };
-  vk.clearAuth = function () { localStorage.removeItem(STORAGE_KEY); };
+  vk.clearAuth = function () {
+    localStorage.removeItem(STORAGE_KEY);
+    // Also drop the per-tenant connection — see TENANT_KEYS comment above.
+    TENANT_KEYS.forEach(k => localStorage.removeItem(k));
+  };
   vk.token = function () { const a = vk.getAuth(); return a && a.token ? a.token : null; };
   vk.username = function () { const a = vk.getAuth(); return a ? a.username : null; };
   vk.role = function () { const a = vk.getAuth(); return a ? (a.role || 'reader') : null; };

@@ -773,3 +773,35 @@ typed.
 - `test@gmx.com` + form submit → 201 + toast "Entry 'newuser1' saved", row appears in list.
 - Invalid email caught client-side by the native `<input type="email">` validator before submit.
 
+
+### 2026-02-07 — Fix: stale tenant conn ejects user to login after re-auth + Tenant dropdown
+**Bug:** After entering a bogus tenant+token in the Console's Connect modal (e.g. `test`/`test`),
+the next API call 401'd; `auth.js`'s 401 handler cleared the JWT and redirected to `/login.html`.
+Logging back in as `admin/admin` looked successful — but `bootApp()` immediately fired
+`refreshSidebar()` because the bogus `vk.tenant`/`vk.auth.mode`/`vk.auth.token` keys were *still*
+in localStorage, that request 401'd again, and the user was ejected back to login. Infinite loop.
+
+**Root cause:** `vk.clearAuth()` only removed the JWT key (`vk.auth.v1`). It never touched the
+per-tenant connection keys, so they survived every logout/expiry and kept poisoning the next
+session.
+
+**Fix:** `valkeyry-config/src/main/resources/static/assets/auth.js`
+- `vk.clearAuth()` now also removes `vk.tenant`, `vk.auth.mode`, `vk.auth.token`.
+- These keys are documented in a `TENANT_KEYS` constant alongside the existing `STORAGE_KEY`
+  so the two sources of session state stay in sync.
+
+### 2026-02-07 — Feature: Tenant ID dropdown in Connect modal
+**Why:** Users were typing tenant slugs from memory and often got them wrong (which was the
+trigger for the bogus-conn logout loop above). Showing the list of tenants the user is entitled
+to removes the foot-gun entirely.
+
+**Implementation:** `valkeyry-config/src/main/resources/static/index.html`
+- `#auth-tenant` input now backs onto a `<datalist id="auth-tenant-options">` so it stays a
+  free-text field (power users / brand-new tenants still work) but offers a native dropdown.
+- New `openConnectModal()` function replaces the inline `showModal()` onclick. It populates the
+  datalist before opening, in priority order:
+    1. `GET /api/v1/admin/tenants` (admins get the rich `id — name` labels).
+    2. `vk.tenants()` from the JWT (non-admins; `*` wildcard is excluded).
+- Verified: dropdown shows `demo-tenant — Demo Tenant` and `test — test` after creating `test`
+  via the Admin GUI.
+

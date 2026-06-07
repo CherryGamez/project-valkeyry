@@ -291,7 +291,7 @@
                 <span id="conn-text" class="font-mono">disconnected</span>
             </div>
             <button id="open-auth-btn" data-testid="open-auth-btn"
-                    onclick="document.getElementById('auth-modal').showModal()"
+                    onclick="openConnectModal()"
                     class="btn-primary press text-[13px] px-4 py-1.5">
                 Connect
             </button>
@@ -332,7 +332,9 @@
         <form id="auth-form" onsubmit="event.preventDefault(); saveConn();" class="grid gap-4">
             <label class="grid gap-1.5">
                 <span class="section-label">Tenant ID</span>
-                <input id="auth-tenant" data-testid="auth-tenant-input" placeholder="demo-tenant" required class="ios-input"/>
+                <input id="auth-tenant" data-testid="auth-tenant-input" placeholder="demo-tenant"
+                       list="auth-tenant-options" autocomplete="off" required class="ios-input"/>
+                <datalist id="auth-tenant-options" data-testid="auth-tenant-options"></datalist>
             </label>
             <label class="grid gap-1.5">
                 <span class="section-label">Auth mode</span>
@@ -883,6 +885,40 @@ function switchTab(name) {
 }
 
 // ============== Connection / auth modal ==============
+// Populate the Tenant-ID datalist before showing the modal so users can pick from
+// known tenants without remembering slugs. Strategy (in priority order):
+//   1. /api/v1/admin/tenants     — works for admins; richest list (id + name).
+//   2. vk.tenants()              — fall back to the user's JWT entitlements, minus
+//                                  the wildcard "*" which isn't a real tenant id.
+// Either way the input remains free-text via <datalist>, so power users / new
+// tenants not yet refreshed in the dropdown can still type their slug manually.
+async function openConnectModal() {
+    const dl = document.getElementById('auth-tenant-options');
+    if (dl) {
+        // Clear stale options so a previous user's tenants don't leak across re-opens.
+        dl.innerHTML = '';
+        let slugs = [];
+        try {
+            const r = await (window.vk && vk.fetch ? vk.fetch('/api/v1/admin/tenants') : fetch('/api/v1/admin/tenants'));
+            if (r && r.ok) {
+                const tenants = await r.json();
+                slugs = tenants.map(t => ({ id: t.id, label: t.name ? (t.id + ' — ' + t.name) : t.id }));
+            }
+        } catch (_) { /* fall through to vk.tenants() */ }
+        if (slugs.length === 0 && window.vk && vk.tenants) {
+            slugs = vk.tenants().filter(t => t && t !== '*').map(t => ({ id: t, label: t }));
+        }
+        slugs.forEach(({ id, label }) => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.label = label;       // shown on macOS/Linux Firefox + Safari
+            opt.textContent = label; // shown on Chrome/Edge
+            dl.appendChild(opt);
+        });
+    }
+    document.getElementById('auth-modal').showModal();
+}
+
 function saveConn() {
     const next = {
         tenantId: document.getElementById('auth-tenant').value.trim(),
