@@ -30,9 +30,13 @@
     <!-- Toggle: set LOG_LINENUM=false at runtime to skip the (File:line) suffix in production. -->
     <property name="LOG_LINENUM" value="${LOG_LINENUM:-true}"/>
 
-    <!-- Pattern w/ source location (default for dev / staging). -->
+    <!-- Pattern w/ source location (default for dev / staging).
+         NB: parentheses around `%F:%L` are escaped with `\(` `\)` so Logback's pattern
+         parser treats them as literals rather than as a composite-converter argument list
+         (which would otherwise blow up with `Failed to instantiate converter class ... for
+         keyword [method]` at startup). -->
     <property name="PATTERN_WITH_LOC"
-              value="%date{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] [req=%X{requestId:-} trace=%X{traceId:-} tenant=%X{tenantId:-} table=%X{tableName:-} row=%X{rowIndex:-} recordKey=%X{recordKey:-}] %logger{36}.%method(%file:%line) - %msg%n%rEx{full}"/>
+              value="%date{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] [req=%X{requestId:-} trace=%X{traceId:-} tenant=%X{tenantId:-} table=%X{tableName:-} row=%X{rowIndex:-} recordKey=%X{recordKey:-}] %logger{36}.%M\(%F:%L\) - %msg%n%rEx{full}"/>
 
     <!-- Same minus file:line for hot paths. -->
     <property name="PATTERN_NO_LOC"

@@ -211,35 +211,35 @@ public class VirtualTableController {
         if (entry == null) {
             log.warn("Bulk ingest row[{}] rejected: entry is null (tenant={} table={} requestId={})",
                     idx, tenantId, tableName, requestId);
-            return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidData(idx, null,
+            return Mono.just(BatchRowOutcome.ofFailed(BatchEntryError.invalidData(idx, null,
                     "entry is null")));
         }
         String recordKey = entry.recordKey();
         if (recordKey == null || recordKey.isBlank()) {
             log.warn("Bulk ingest row[{}] rejected: blank recordKey (tenant={} table={} requestId={})",
                     idx, tenantId, tableName, requestId);
-            return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidRecordKey(idx, recordKey,
+            return Mono.just(BatchRowOutcome.ofFailed(BatchEntryError.invalidRecordKey(idx, recordKey,
                     "recordKey is blank — every row needs a non-empty key")));
         }
         if (entry.data() == null || entry.data().isNull()) {
             log.warn("Bulk ingest row[{}] rejected: null data (tenant={} table={} recordKey={} requestId={})",
                     idx, tenantId, tableName, recordKey, requestId);
-            return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidData(idx, recordKey,
+            return Mono.just(BatchRowOutcome.ofFailed(BatchEntryError.invalidData(idx, recordKey,
                     "data field is null — supply the row payload as a JSON object")));
         }
 
         return service.ingest(tenantId, tableName, recordKey, entry.data(),
                         auth.getName(), track, requestId)
-                .map(BatchRowOutcome::inserted)
+                .map(BatchRowOutcome::ofInserted)
                 .onErrorResume(IdempotentDuplicateException.class, ex -> {
                     log.debug("Bulk ingest row[{}] is duplicate (tenant={} table={} recordKey={} hash={})",
                             idx, tenantId, tableName, recordKey, ex.payloadHash());
-                    return Mono.just(BatchRowOutcome.duplicate());
+                    return Mono.just(BatchRowOutcome.ofDuplicate());
                 })
                 .onErrorResume(SchemaValidationException.class, ex -> {
                     log.warn("Bulk ingest row[{}] schema-violation (tenant={} table={} recordKey={}): {}",
                             idx, tenantId, tableName, recordKey, ex.violations());
-                    return Mono.just(BatchRowOutcome.failed(BatchEntryError.schemaViolation(
+                    return Mono.just(BatchRowOutcome.ofFailed(BatchEntryError.schemaViolation(
                             idx, recordKey,
                             "Schema validation failed for row " + idx
                                     + " (recordKey=" + recordKey + ")",
@@ -255,7 +255,7 @@ public class VirtualTableController {
                 .onErrorResume(IllegalArgumentException.class, ex -> {
                     log.warn("Bulk ingest row[{}] invalid-argument (tenant={} table={} recordKey={}): {}",
                             idx, tenantId, tableName, recordKey, ex.getMessage());
-                    return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidData(
+                    return Mono.just(BatchRowOutcome.ofFailed(BatchEntryError.invalidData(
                             idx, recordKey, ex.getMessage())));
                 })
                 .onErrorResume(ResponseStatusException.class, ex -> {
@@ -266,7 +266,7 @@ public class VirtualTableController {
                             : status == 422 ? "schema-violation"
                             : status >= 500 ? "internal"
                             : "invalid-data";
-                    return Mono.just(BatchRowOutcome.failed(new BatchEntryError(
+                    return Mono.just(BatchRowOutcome.ofFailed(new BatchEntryError(
                             idx, recordKey, "failed", type, status,
                             ex.getReason() == null ? ex.getMessage() : ex.getReason(),
                             List.of(), null)));
@@ -282,7 +282,7 @@ public class VirtualTableController {
                     } finally {
                         MDC.remove("traceId");
                     }
-                    return Mono.just(BatchRowOutcome.failed(BatchEntryError.internal(
+                    return Mono.just(BatchRowOutcome.ofFailed(BatchEntryError.internal(
                             idx, recordKey,
                             ex.getClass().getSimpleName() + ": "
                                     + (ex.getMessage() == null ? "<no detail>" : ex.getMessage())
@@ -293,9 +293,9 @@ public class VirtualTableController {
 
     /** Internal three-way outcome from {@link #ingestOne}. */
     private record BatchRowOutcome(EntryView view, boolean duplicate, BatchEntryError error) {
-        static BatchRowOutcome inserted(EntryView view)            { return new BatchRowOutcome(view, false, null); }
-        static BatchRowOutcome duplicate()                          { return new BatchRowOutcome(null, true,  null); }
-        static BatchRowOutcome failed(BatchEntryError e)            { return new BatchRowOutcome(null, false, e);    }
+        static BatchRowOutcome ofInserted(EntryView view)         { return new BatchRowOutcome(view, false, null); }
+        static BatchRowOutcome ofDuplicate()                      { return new BatchRowOutcome(null, true,  null); }
+        static BatchRowOutcome ofFailed(BatchEntryError e)        { return new BatchRowOutcome(null, false, e);    }
     }
 
     private ResponseEntity<BatchIngestResponse> buildResponse(String tenantId, String tableName,
