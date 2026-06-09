@@ -8,20 +8,27 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.valkeyry.config.error.IdempotentDuplicateException;
+import io.valkeyry.config.error.SchemaValidationException;
+import io.valkeyry.config.error.VirtualTableNotFoundException;
 import io.valkeyry.config.security.AuthTrack;
 import io.valkeyry.config.security.TenantAccessGuard;
 import io.valkeyry.config.service.VirtualTableService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * REST API for the headless schema registry.
@@ -37,6 +44,8 @@ import java.util.List;
 @Tag(name = "Virtual tables & entries",
      description = "Declare JSON-Schema-backed virtual tables and ingest/read/delete records under them.")
 public class VirtualTableController {
+
+    private static final Logger log = LoggerFactory.getLogger(VirtualTableController.class);
 
     private final VirtualTableService service;
     private final TenantAccessGuard guard;
@@ -140,10 +149,26 @@ public class VirtualTableController {
 
     @PostMapping("/tables/{name}/entries:batch")
     @Operation(summary = "Ingest a list of entries in one call",
-               description = "Body is an array of `{ recordKey, data }` objects. Each row is validated independently; duplicates count as `duplicates`, valid rows as `inserted`. Returns a summary plus the inserted views.")
+               description = """
+                       Body is an array of `{ recordKey, data }` objects. Each row is validated
+                       and persisted **independently** — one bad row does not abort the batch.
+
+                       The response is a structured breakdown:
+                       * `submitted` — number of rows the caller sent.
+                       * `inserted` / `duplicates` / `failed` — partitioned outcome counts.
+                       * `results[]` — inserted rows (one `EntryView` each).
+                       * `errors[]` — one entry per failed row, carrying `index` (0-based
+                         position in the request), `recordKey`, `errorType`, `httpStatus`,
+                         `message` and (for schema failures) the list of `violations`. Use
+                         `index` to map the failure back to the source spreadsheet/JSON file.
+
+                       Status code: **201** when every row was accepted (inserted + duplicates),
+                       **207 Multi-Status** when some rows failed but at least one succeeded,
+                       **422 Unprocessable Entity** when every row failed.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "201", description = "Batch processed — see body for breakdown"),
-        @ApiResponse(responseCode = "422", description = "At least one row failed schema validation")
+        @ApiResponse(responseCode = "201", description = "Batch fully processed — see body for breakdown"),
+        @ApiResponse(responseCode = "207", description = "Partial success — at least one row failed"),
+        @ApiResponse(responseCode = "422", description = "Every row failed validation")
     })
     public Mono<ResponseEntity<BatchIngestResponse>> ingestBatch(@PathVariable String tenantId,
                                                                  @PathVariable("name") String tableName,
@@ -152,27 +177,153 @@ public class VirtualTableController {
                                                                  ServerWebExchange exchange) {
         String track = AuthTrack.of(auth).name();
         String requestId = exchange.getRequest().getId();
+        int total = req.entries().size();
+        log.info("Bulk ingest start: tenant={} table={} entries={} requestId={} actor={}",
+                tenantId, tableName, total, requestId, auth.getName());
+
         return guard.check(auth, tenantId)
-                .thenMany(Flux.fromIterable(req.entries()))
-                .concatMap(entry -> service.ingest(tenantId, tableName, entry.recordKey(), entry.data(),
-                                auth.getName(), track, requestId)
-                        .map(view -> new BatchResult(view, false))
-                        .onErrorResume(IdempotentDuplicateException.class,
-                                ex -> Mono.just(new BatchResult(null, true))))
+                .thenMany(Flux.fromIterable(req.entries())
+                        .index() // -> Tuple2<Long, IngestRecordRequest>
+                        .concatMap(tuple -> {
+                            int idx = tuple.getT1().intValue();
+                            IngestRecordRequest entry = tuple.getT2();
+                            return ingestOne(tenantId, tableName, idx, entry, auth, track, requestId);
+                        }))
                 .collectList()
-                .map(results -> {
-                    int inserted = 0; int duplicates = 0;
-                    List<EntryView> views = new ArrayList<>();
-                    for (BatchResult r : results) {
-                        if (r.duplicate) duplicates++;
-                        else { inserted++; views.add(r.view); }
+                .map(results -> buildResponse(tenantId, tableName, total, results, requestId));
+    }
+
+    /**
+     * Ingest one row and turn ANY outcome into a {@link BatchRowOutcome} — never propagates
+     * the error upstream. This is what lets a single malformed row coexist with hundreds of
+     * good rows in the same batch without aborting the whole upload.
+     *
+     * <p>Each failure path is logged at {@code WARN} (or {@code ERROR} for unexpected
+     * exceptions) with the full context — {@code tenantId / tableName / index / recordKey}
+     * pinned into the MDC so a developer can grep for the exact line.</p>
+     */
+    private Mono<BatchRowOutcome> ingestOne(String tenantId, String tableName, int idx,
+                                            IngestRecordRequest entry, Authentication auth,
+                                            String track, String requestId) {
+        // Defensive null / blank guard — bean validation runs at the request level, but
+        // individual entries inside the list can still slip through with blank values when
+        // the caller streams from a CSV/XLSX.
+        if (entry == null) {
+            log.warn("Bulk ingest row[{}] rejected: entry is null (tenant={} table={} requestId={})",
+                    idx, tenantId, tableName, requestId);
+            return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidData(idx, null,
+                    "entry is null")));
+        }
+        String recordKey = entry.recordKey();
+        if (recordKey == null || recordKey.isBlank()) {
+            log.warn("Bulk ingest row[{}] rejected: blank recordKey (tenant={} table={} requestId={})",
+                    idx, tenantId, tableName, requestId);
+            return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidRecordKey(idx, recordKey,
+                    "recordKey is blank — every row needs a non-empty key")));
+        }
+        if (entry.data() == null || entry.data().isNull()) {
+            log.warn("Bulk ingest row[{}] rejected: null data (tenant={} table={} recordKey={} requestId={})",
+                    idx, tenantId, tableName, recordKey, requestId);
+            return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidData(idx, recordKey,
+                    "data field is null — supply the row payload as a JSON object")));
+        }
+
+        return service.ingest(tenantId, tableName, recordKey, entry.data(),
+                        auth.getName(), track, requestId)
+                .map(BatchRowOutcome::inserted)
+                .onErrorResume(IdempotentDuplicateException.class, ex -> {
+                    log.debug("Bulk ingest row[{}] is duplicate (tenant={} table={} recordKey={} hash={})",
+                            idx, tenantId, tableName, recordKey, ex.payloadHash());
+                    return Mono.just(BatchRowOutcome.duplicate());
+                })
+                .onErrorResume(SchemaValidationException.class, ex -> {
+                    log.warn("Bulk ingest row[{}] schema-violation (tenant={} table={} recordKey={}): {}",
+                            idx, tenantId, tableName, recordKey, ex.violations());
+                    return Mono.just(BatchRowOutcome.failed(BatchEntryError.schemaViolation(
+                            idx, recordKey,
+                            "Schema validation failed for row " + idx
+                                    + " (recordKey=" + recordKey + ")",
+                            ex.violations())));
+                })
+                .onErrorResume(VirtualTableNotFoundException.class, ex -> {
+                    // Fail the entire batch — every row would hit the same error. Bubble up
+                    // so the global handler returns a single 404 instead of N copies.
+                    log.warn("Bulk ingest aborted at row[{}]: table not found (tenant={} table={})",
+                            idx, tenantId, tableName);
+                    return Mono.error(ex);
+                })
+                .onErrorResume(IllegalArgumentException.class, ex -> {
+                    log.warn("Bulk ingest row[{}] invalid-argument (tenant={} table={} recordKey={}): {}",
+                            idx, tenantId, tableName, recordKey, ex.getMessage());
+                    return Mono.just(BatchRowOutcome.failed(BatchEntryError.invalidData(
+                            idx, recordKey, ex.getMessage())));
+                })
+                .onErrorResume(ResponseStatusException.class, ex -> {
+                    log.warn("Bulk ingest row[{}] rejected by downstream (tenant={} table={} recordKey={} status={}): {}",
+                            idx, tenantId, tableName, recordKey, ex.getStatusCode().value(), ex.getReason(), ex);
+                    int status = ex.getStatusCode().value();
+                    String type = status == 404 ? "table-not-found"
+                            : status == 422 ? "schema-violation"
+                            : status >= 500 ? "internal"
+                            : "invalid-data";
+                    return Mono.just(BatchRowOutcome.failed(new BatchEntryError(
+                            idx, recordKey, "failed", type, status,
+                            ex.getReason() == null ? ex.getMessage() : ex.getReason(),
+                            List.of(), null)));
+                })
+                .onErrorResume(Throwable.class, ex -> {
+                    String traceId = UUID.randomUUID().toString();
+                    // Pin the trace id into the MDC so the same id appears in the stack-trace
+                    // line below — that's the anchor the caller will copy into a `grep`.
+                    MDC.put("traceId", traceId);
+                    try {
+                        log.error("Bulk ingest row[{}] unexpected failure traceId={} (tenant={} table={} recordKey={} requestId={})",
+                                idx, traceId, tenantId, tableName, recordKey, requestId, ex);
+                    } finally {
+                        MDC.remove("traceId");
                     }
-                    return ResponseEntity.status(HttpStatus.CREATED).body(
-                            new BatchIngestResponse(req.entries().size(), inserted, duplicates, views));
+                    return Mono.just(BatchRowOutcome.failed(BatchEntryError.internal(
+                            idx, recordKey,
+                            ex.getClass().getSimpleName() + ": "
+                                    + (ex.getMessage() == null ? "<no detail>" : ex.getMessage())
+                                    + " — search server log for traceId=" + traceId,
+                            traceId)));
                 });
     }
 
-    private record BatchResult(EntryView view, boolean duplicate) {}
+    /** Internal three-way outcome from {@link #ingestOne}. */
+    private record BatchRowOutcome(EntryView view, boolean duplicate, BatchEntryError error) {
+        static BatchRowOutcome inserted(EntryView view)            { return new BatchRowOutcome(view, false, null); }
+        static BatchRowOutcome duplicate()                          { return new BatchRowOutcome(null, true,  null); }
+        static BatchRowOutcome failed(BatchEntryError e)            { return new BatchRowOutcome(null, false, e);    }
+    }
+
+    private ResponseEntity<BatchIngestResponse> buildResponse(String tenantId, String tableName,
+                                                              int submitted, List<BatchRowOutcome> rows,
+                                                              String requestId) {
+        int inserted = 0, duplicates = 0, failed = 0;
+        List<EntryView> views = new ArrayList<>();
+        List<BatchEntryError> errors = new ArrayList<>();
+        for (BatchRowOutcome r : rows) {
+            if (r.error != null)       { failed++;     errors.add(r.error); }
+            else if (r.duplicate)      { duplicates++; }
+            else                       { inserted++;   views.add(r.view); }
+        }
+        HttpStatus status;
+        if (failed == 0)              status = HttpStatus.CREATED;
+        else if (inserted + duplicates == 0) status = HttpStatus.UNPROCESSABLE_ENTITY;
+        else                          status = HttpStatus.MULTI_STATUS;
+
+        if (failed == 0) {
+            log.info("Bulk ingest done OK: tenant={} table={} submitted={} inserted={} duplicates={} requestId={}",
+                    tenantId, tableName, submitted, inserted, duplicates, requestId);
+        } else {
+            log.warn("Bulk ingest done with failures: tenant={} table={} submitted={} inserted={} duplicates={} failed={} requestId={}",
+                    tenantId, tableName, submitted, inserted, duplicates, failed, requestId);
+        }
+        return ResponseEntity.status(status).body(
+                new BatchIngestResponse(submitted, inserted, duplicates, failed, views, errors));
+    }
 
     @GetMapping("/tables/{name}/entries/{recordKey}")
     @Operation(summary = "Fetch the latest version of an entry")

@@ -28,9 +28,20 @@ public abstract class PushTask extends DefaultTask {
         Path manifest = getManifestPath().get().getAsFile().toPath();
         Path baseDir = getProject().getProjectDir().toPath();
         PluginLog log = new GradlePluginLog(getLogger());
-        PluginResult res = PluginEngine.run(new PluginContext(manifest, baseDir, log));
-        log.info(String.format("valkeyry-config push complete — submitted=%d inserted=%d duplicates=%d",
-                res.submitted(), res.inserted(), res.duplicates()));
+        try {
+            PluginResult res = PluginEngine.run(new PluginContext(manifest, baseDir, log));
+            log.info(String.format("valkeyry-config push complete — submitted=%d inserted=%d duplicates=%d failed=%d",
+                    res.submitted(), res.inserted(), res.duplicates(), res.failed()));
+            if (res.hasFailures()) {
+                throw new org.gradle.api.GradleException(
+                        "valkeyry-config push: " + res.failed()
+                                + " row(s) failed validation. See the report above for the exact files to fix.");
+            }
+        } catch (io.valkeyry.plugin.core.http.ValkeyryConfigApiException ae) {
+            // Already logged in PluginEngine.run with per-row detail.
+            log.error("valkeyry-config push failed", ae);
+            throw new org.gradle.api.GradleException("valkeyry-config push failed: " + ae.getMessage(), ae);
+        }
     }
 
     private static final class GradlePluginLog implements PluginLog {

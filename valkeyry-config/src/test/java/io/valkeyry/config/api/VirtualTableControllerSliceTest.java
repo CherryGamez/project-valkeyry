@@ -139,6 +139,103 @@ class VirtualTableControllerSliceTest {
                 .expectBody().jsonPath("$[0].tableName").isEqualTo("customers");
     }
 
+    @Test
+    @WithMockUser(authorities = {"ROLE_VALKEYRY_WRITER"})
+    void batchIngestReportsPerRowFailures207() {
+        // Row 0 inserts cleanly, row 1 hits a schema violation, row 2 is a duplicate, row 3
+        // explodes with an unexpected NullPointerException. The controller must return all
+        // four outcomes in a single 207 response so the caller can fix exactly the bad
+        // rows without re-uploading the good ones.
+        EntryView okView = new EntryView(UUID.randomUUID(), "demo", "customers", "row-0",
+                1L, true, "abc", mapper.createObjectNode(), Instant.now(), "test");
+
+        when(service.ingest(anyString(), anyString(), org.mockito.ArgumentMatchers.eq("row-0"),
+                any(JsonNode.class), anyString(), anyString(), anyString()))
+                .thenReturn(Mono.just(okView));
+        when(service.ingest(anyString(), anyString(), org.mockito.ArgumentMatchers.eq("row-1"),
+                any(JsonNode.class), anyString(), anyString(), anyString()))
+                .thenReturn(Mono.error(new SchemaValidationException(List.of("$.age: must be >= 0"))));
+        when(service.ingest(anyString(), anyString(), org.mockito.ArgumentMatchers.eq("row-2"),
+                any(JsonNode.class), anyString(), anyString(), anyString()))
+                .thenReturn(Mono.error(new IdempotentDuplicateException("row-2", "deadbeef")));
+        when(service.ingest(anyString(), anyString(), org.mockito.ArgumentMatchers.eq("row-3"),
+                any(JsonNode.class), anyString(), anyString(), anyString()))
+                .thenReturn(Mono.error(new NullPointerException("boom")));
+
+        client.post().uri("/api/v1/tenants/demo/tables/customers/entries:batch")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"entries":[
+                          {"recordKey":"row-0","data":{"v":0}},
+                          {"recordKey":"row-1","data":{"age":-1}},
+                          {"recordKey":"row-2","data":{"v":2}},
+                          {"recordKey":"row-3","data":{"v":3}}
+                        ]}""")
+                .exchange()
+                .expectStatus().isEqualTo(207)
+                .expectBody()
+                .jsonPath("$.submitted").isEqualTo(4)
+                .jsonPath("$.inserted").isEqualTo(1)
+                .jsonPath("$.duplicates").isEqualTo(1)
+                .jsonPath("$.failed").isEqualTo(2)
+                .jsonPath("$.errors.length()").isEqualTo(2)
+                .jsonPath("$.errors[0].index").isEqualTo(1)
+                .jsonPath("$.errors[0].recordKey").isEqualTo("row-1")
+                .jsonPath("$.errors[0].errorType").isEqualTo("schema-violation")
+                .jsonPath("$.errors[0].violations[0]").isEqualTo("$.age: must be >= 0")
+                .jsonPath("$.errors[1].index").isEqualTo(3)
+                .jsonPath("$.errors[1].recordKey").isEqualTo("row-3")
+                .jsonPath("$.errors[1].errorType").isEqualTo("internal")
+                .jsonPath("$.errors[1].traceId").exists();
+    }
+
+    @Test
+    @WithMockUser(authorities = {"ROLE_VALKEYRY_WRITER"})
+    void batchIngestReturns422WhenEveryRowFails() {
+        when(service.ingest(anyString(), anyString(), anyString(), any(JsonNode.class),
+                anyString(), anyString(), anyString()))
+                .thenReturn(Mono.error(new SchemaValidationException(List.of("required field 'name'"))));
+        client.post().uri("/api/v1/tenants/demo/tables/customers/entries:batch")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"entries":[
+                          {"recordKey":"r0","data":{}},
+                          {"recordKey":"r1","data":{}}
+                        ]}""")
+                .exchange()
+                .expectStatus().isEqualTo(422)
+                .expectBody()
+                .jsonPath("$.failed").isEqualTo(2)
+                .jsonPath("$.inserted").isEqualTo(0)
+                .jsonPath("$.errors[0].errorType").isEqualTo("schema-violation")
+                .jsonPath("$.errors[1].errorType").isEqualTo("schema-violation");
+    }
+
+    @Test
+    @WithMockUser(authorities = {"ROLE_VALKEYRY_WRITER"})
+    void batchIngestReturns201WhenAllRowsSucceed() {
+        EntryView okView = new EntryView(UUID.randomUUID(), "demo", "customers", "x",
+                1L, true, "abc", mapper.createObjectNode(), Instant.now(), "test");
+        when(service.ingest(anyString(), anyString(), anyString(), any(JsonNode.class),
+                anyString(), anyString(), anyString()))
+                .thenReturn(Mono.just(okView));
+        client.post().uri("/api/v1/tenants/demo/tables/customers/entries:batch")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"entries":[
+                          {"recordKey":"a","data":{}},
+                          {"recordKey":"b","data":{}}
+                        ]}""")
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody()
+                .jsonPath("$.submitted").isEqualTo(2)
+                .jsonPath("$.inserted").isEqualTo(2)
+                .jsonPath("$.failed").isEqualTo(0);
+    }
+
+
+
     @org.springframework.boot.SpringBootConfiguration
     @org.springframework.context.annotation.ComponentScan(
             basePackageClasses = io.valkeyry.config.api.VirtualTableController.class,

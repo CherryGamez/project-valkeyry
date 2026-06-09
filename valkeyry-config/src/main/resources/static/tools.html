@@ -322,8 +322,18 @@ document.getElementById('import-btn').addEventListener('click', async () => {
                 body: JSON.stringify({ tableName: tn, schema: inferSchemaFromRows(table) })
             });
             if (!declareRes.ok && declareRes.status !== 409) {
-                const body = await declareRes.text();
-                log.push(`<div class="text-red-600">✗ <code>${tn}</code> · declare failed (${declareRes.status}) — ${escapeHtml(body).slice(0, 200)}</div>`);
+                let detail;
+                try {
+                    const j = await declareRes.json();
+                    detail = j.detail || j.title || JSON.stringify(j);
+                    if (Array.isArray(j.violations) && j.violations.length > 0) {
+                        detail += ' — ' + j.violations.join('; ');
+                    }
+                    if (j.traceId) detail += ` (traceId=${j.traceId})`;
+                } catch {
+                    detail = (await declareRes.text()).slice(0, 200);
+                }
+                log.push(`<div class="text-red-600">✗ <code>${tn}</code> · declare failed (${declareRes.status}) — ${escapeHtml(detail)}</div>`);
                 continue;
             }
             // 2. Bulk ingest rows with auto-derived recordKeys.
@@ -342,13 +352,48 @@ document.getElementById('import-btn').addEventListener('click', async () => {
                     body: JSON.stringify({ entries })
                 });
             const ingestBody = await ingestRes.json().catch(() => ({}));
-            if (ingestRes.ok) {
-                const inserted   = ingestBody.inserted   ?? entries.length;
+            // 201 = all-OK, 207 = partial, 422 = all-failed. The server returns the same
+            // body shape in every case (submitted/inserted/duplicates/failed/errors[]) so
+            // we render uniformly from `ingestBody`.
+            if (ingestRes.status === 201 || ingestRes.status === 207 || ingestRes.status === 422) {
+                const inserted   = ingestBody.inserted   ?? 0;
                 const duplicates = ingestBody.duplicates ?? 0;
+                const failed     = ingestBody.failed     ?? 0;
                 const renameNote = (tn !== original) ? ` <span class="text-gray-500">(renamed from "${escapeHtml(original)}")</span>` : '';
-                log.push(`<div class="text-green-700">✓ <code>${tn}</code>${renameNote} · ${inserted} inserted, ${duplicates} duplicate(s)</div>`);
+                const color = failed === 0 ? 'text-green-700'
+                            : inserted > 0 ? 'text-amber-700'
+                            : 'text-red-600';
+                const icon  = failed === 0 ? '✓' : (inserted > 0 ? '⚠' : '✗');
+                let entry = `<div class="${color}">${icon} <code>${tn}</code>${renameNote} · `
+                          + `${inserted} inserted, ${duplicates} duplicate(s), ${failed} failed</div>`;
+                // For each failure, point at the row (entry index is 0-based but we display
+                // 1-based so it matches what the user sees in their spreadsheet).
+                const errors = Array.isArray(ingestBody.errors) ? ingestBody.errors : [];
+                if (errors.length > 0) {
+                    const lines = errors.map(err => {
+                        const at = `row ${(err.index ?? -1) + 1}`
+                                 + (err.recordKey ? ` (recordKey=${escapeHtml(err.recordKey)})` : '');
+                        let body = `${escapeHtml(err.errorType || 'failed')}: ${escapeHtml(err.message || '')}`;
+                        if (Array.isArray(err.violations) && err.violations.length > 0) {
+                            body += '<ul class="ml-4 list-disc">'
+                                  + err.violations.map(v => `<li>${escapeHtml(v)}</li>`).join('')
+                                  + '</ul>';
+                        }
+                        if (err.traceId) {
+                            body += `<div class="text-xs text-gray-500">server log: grep traceId=${escapeHtml(err.traceId)}</div>`;
+                        }
+                        return `<li class="text-red-600"><span class="font-mono">${at}</span> — ${body}</li>`;
+                    });
+                    entry += `<ul class="ml-6 text-xs space-y-0.5">${lines.join('')}</ul>`;
+                }
+                log.push(entry);
             } else {
-                log.push(`<div class="text-red-600">✗ <code>${tn}</code> · ingest failed (${ingestRes.status})</div>`);
+                // Any other status (404 missing table, 401, 5xx, …) — surface the
+                // ProblemDetail's `detail` field plus the optional `traceId` so the user
+                // can match the failure to a server log line.
+                const detail  = ingestBody.detail || ingestBody.title || `HTTP ${ingestRes.status}`;
+                const traceId = ingestBody.traceId ? ` <span class="text-xs text-gray-500">(traceId=${escapeHtml(ingestBody.traceId)})</span>` : '';
+                log.push(`<div class="text-red-600">✗ <code>${tn}</code> · ingest failed — ${escapeHtml(detail)}${traceId}</div>`);
             }
         } catch (e) {
             log.push(`<div class="text-red-600">✗ <code>${tn}</code> · ${escapeHtml(e.message)}</div>`);

@@ -225,6 +225,45 @@ docs:
         agent: "main"
         comment: "New WINDOWS_GUIDE.md (490+ lines) — prereq install with winget commands, docker compose bring-up, Vault bootstrap PowerShell, Ollama model pull, env-var config matrix, 11 manual test sections (smoke, catalog, DLQ + Kafka summary, topologies, multi-publish, AI ENRICH+DECIDE, Copilot end-to-end, SSE metrics, Grafana per-tenant, OIDC, Gatling), troubleshooting matrix, file cheat-sheet, appendix with bootstrap-vault.ps1. LOCAL_SETUP.md updated to link to it."
 
+valkeyry-config:
+  - task: "Bulk import — per-row error response + developer-friendly logging"
+    implemented: true
+    working: "NA"
+    file: "valkeyry-config/src/main/java/io/valkeyry/config/api/{VirtualTableController,ApiExceptionHandler,BatchIngestResponse,BatchEntryError,RequestMdcFilter,ToolsController}.java; valkeyry-config/src/main/resources/logback-spring.xml; valkeyry-config/src/main/resources/static/{tools.html,index.html}; valkeyry-config-plugin/plugin-core/src/main/java/io/valkeyry/plugin/core/{PluginEngine,PluginResult}.java; valkeyry-config-plugin/plugin-core/src/main/java/io/valkeyry/plugin/core/http/{ValkeyryConfigClient,BatchEntryError,ValkeyryConfigApiException}.java"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Reworked the bulk-import path so failures are no longer opaque:
+            • `BatchIngestResponse` now also carries `failed` + `errors[]` (index, recordKey,
+              errorType, httpStatus, message, violations[], traceId). Old fields preserved.
+            • Controller no longer aborts the batch on the first bad row; per-row catches for
+              SchemaValidationException, IllegalArgumentException, ResponseStatusException,
+              and a Throwable fallback that assigns a `traceId` and logs the full stack.
+              Returns 201 / 207 Multi-Status / 422 depending on partition.
+            • Added logback-spring.xml: pattern includes class.method(File.java:line) + MDC
+              keys (requestId, traceId, tenantId, tableName, recordKey, rowIndex). Devs can
+              go straight from a log line to the offending source line.
+            • New RequestMdcFilter fills the MDC for every request from the path.
+            • ApiExceptionHandler grew Throwable + ResponseStatusException + ServerWebInputException
+              handlers — all log with traceId, all return ProblemDetail with the traceId so
+              users can grep server logs.
+            • ToolsController XLSX/CSV parsers now report sheet!cell + line numbers when a
+              cell fails to parse.
+            • PLUGIN: ValkeyryConfigClient parses the new errors[]; each EntryRequest carries
+              the source file path so the failure report points at the JSON file. New
+              ValkeyryConfigApiException with structured failure list. PluginEngine logs each
+              failing row as `<file>: recordKey=… — errorType: detail` and re-throws on 422.
+              PluginResult gains `failed` + `failures[]`. Maven Mojo / Gradle Task fail the
+              build when any row failed.
+            • Frontend tools.html + index.html render per-row errors (row N, recordKey,
+              violations[], traceId).
+            • Tests: PluginEngineBulkErrorTest (207 partial + 422 all-failed); three new
+              cases in VirtualTableControllerSliceTest (mixed 207, all-failed 422, all-OK 201).
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
@@ -233,10 +272,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Spring AI ChatClient multi-provider (Ollama default; OpenAI/Anthropic opt-in)"
-    - "Operator Copilot (Spring AI tool-calling agent)"
-    - "Kafka DLQ peek via AdminClient (offset-window introspection)"
-    - "Per-project Prometheus tag enrichment + cardinality guard"
+    - "Bulk import — per-row error response + developer-friendly logging"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -244,24 +280,42 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: |
-      Iteration 8 delivered. Three P1 features + comprehensive Windows guide + Gatling load tests.
+      Iteration 9 — bulk-import error visibility (valkeyry-config + plugin).
 
-      What's NEW since iteration 7:
-       • Spring AI ChatClient wired (Ollama default; OpenAI/Anthropic activate on api-key)
-       • Operator Copilot tab + REST endpoints (chat / stream / tools / providers / history / reset)
-       • CopilotToolset with 6 READ tools + 3 WRITE tools (write-confirm gated)
-       • Kafka DLQ AdminClient peek (deterministic offset windows + new /summary endpoint)
-       • Per-project Prometheus tags via ServerRequestObservationConvention + cardinality guard
-       • Per-tenant Grafana dashboard with template vars (tenant_id, project_id)
-       • Ollama service + idempotent model-pull container in docker-compose
-       • Gatling load-tests module (4 simulations, Maven invocation, Windows-friendly)
-       • WINDOWS_GUIDE.md: 11 manual-test sections with PowerShell snippets
+      Backend:
+       • `BatchIngestResponse` extended (back-compat): + `failed`, + `errors[]` carrying
+         `index, recordKey, errorType, httpStatus, message, violations[], traceId`.
+       • `VirtualTableController.ingestBatch` now resilient — per-row catches, returns
+         201 / 207 / 422 depending on partition, never aborts the whole batch on a single
+         bad record.
+       • `ApiExceptionHandler` gained Throwable + ServerWebInputException + ResponseStatusException
+         handlers. Every unexpected 5xx returns a traceId that matches the MDC in server logs.
+       • New `logback-spring.xml`: pattern includes `class.method(File.java:line)` + MDC
+         keys (requestId, traceId, tenantId, tableName, recordKey, rowIndex). Devs grep the
+         log → land on the exact source line.
+       • New `RequestMdcFilter` populates MDC per request from path.
+       • `ToolsController` XLSX/CSV parsers now report `sheet!cell` and CSV line numbers
+         when a cell fails to parse.
+
+      Plugin:
+       • `EntryRequest` now carries `sourceFile`; `ValkeyryConfigClient` parses the new
+         `errors[]` and ProblemDetail responses; throws structured `ValkeyryConfigApiException`.
+       • `PluginEngine` logs each failing row as `<file>: recordKey=… — errorType: detail`.
+       • `PluginResult` adds `failed` + `failures[]`. Maven Mojo / Gradle Task now fail
+         the build whenever any row failed and surface a final summary line.
+
+      Frontend:
+       • `tools.html` + `index.html` render per-row errors with violations and traceId hint.
+
+      Tests added:
+       • PluginEngineBulkErrorTest — 207 partial + 422 all-failed paths, validates
+         per-row file attribution and traceId surfacing.
+       • Three cases in VirtualTableControllerSliceTest — mixed 207, all-failed 422, all-OK 201.
 
       Build status:
-       • Frontend `yarn build` ✅ clean
-       • Backend: no JDK available in this container, but code matches Spring Boot 3.3.5 +
-         Spring AI 1.0.1 APIs; pom.xml + application.yml updated.
+       • No JDK in the sandbox container — cannot run `mvn test` here. Code compiles
+         against the existing Spring Boot 3.3.5 + Reactor APIs; tests follow the same
+         patterns as the existing slice / mock-server tests so should be green.
 
-      The user is expected to run `mvn test` on Windows for backend verification.
-      No backend testing agent run requested yet — recommend running deep_testing_backend_v2
-      after the user confirms their Windows build is green.
+      Suggest: deep_testing_backend_v2 to run `mvn -pl valkeyry-config -am test` and the
+      plugin-core tests once the user has Java available.

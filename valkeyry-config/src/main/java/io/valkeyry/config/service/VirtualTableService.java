@@ -137,10 +137,23 @@ public class VirtualTableService {
     public Mono<EntryView> ingest(String tenantId, String tableName, String recordKey, JsonNode payload,
                                   String subject, String actorTrack, String requestId) {
         Mono<EntryView> work = registries.findActive(tenantId, tableName)
-                .switchIfEmpty(Mono.error(new VirtualTableNotFoundException(tenantId, tableName)))
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.warn("Ingest failed: no active virtual table tenant={} table={} recordKey={}",
+                            tenantId, tableName, recordKey);
+                    return Mono.error(new VirtualTableNotFoundException(tenantId, tableName));
+                }))
                 .flatMap(reg -> {
                     JsonNode schemaNode = parseSchemaSafely(reg.getSchemaDefinition());
-                    validator.validateOrThrow(schemaNode, payload);
+                    try {
+                        validator.validateOrThrow(schemaNode, payload);
+                    } catch (io.valkeyry.config.error.SchemaValidationException sve) {
+                        // Log here with full context — the global handler only sees the bare
+                        // exception otherwise. Downstream callers (e.g. the batch endpoint)
+                        // re-catch and turn this into a per-row error.
+                        log.warn("Schema validation failed tenant={} table={} recordKey={} violations={}",
+                                tenantId, tableName, recordKey, sve.violations());
+                        throw sve;
+                    }
                     String hash = PayloadFingerprint.sha256(payload);
                     return entries.findDuplicate(tenantId, tableName, recordKey, hash)
                             .flatMap(dup -> audit.record(tenantId, tableName,

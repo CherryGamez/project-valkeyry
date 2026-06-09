@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.valkeyry.plugin.core.auth.AuthStrategy;
 import io.valkeyry.plugin.core.hash.PayloadFingerprint;
+import io.valkeyry.plugin.core.http.BatchEntryError;
+import io.valkeyry.plugin.core.http.ValkeyryConfigApiException;
 import io.valkeyry.plugin.core.http.ValkeyryConfigClient;
 import io.valkeyry.plugin.core.manifest.ManifestLoader;
 import io.valkeyry.plugin.core.manifest.PluginManifest;
@@ -28,7 +30,15 @@ import java.util.List;
  *   <li>for each declared table: POST schema then POST entries:batch</li>
  *   <li>each entry payload is pre-fingerprinted (SHA-256, canonical JSON) so that the server
  *       Idempotency Guard short-circuits unchanged payloads</li>
+ *   <li>collect every per-row failure the server reports — the source file path travels with
+ *       the entry through the HTTP client so the final report can point the user at the
+ *       exact JSON file to fix</li>
  * </ol>
+ *
+ * <p>Error semantics: this method returns normally on a 201 (all OK) or 207 (partial)
+ * response — the caller is expected to inspect {@link PluginResult#hasFailures()} and decide
+ * whether to fail the build. A 422 (every row failed) or any other non-2xx surfaces as
+ * {@link ValkeyryConfigApiException} carrying the structured failure list.</p>
  */
 public final class PluginEngine {
 
@@ -44,22 +54,32 @@ public final class PluginEngine {
                 URI.create(manifest.getEndpoint()),
                 AuthStrategy.fromManifest(manifest.getAuth()));
 
-        // Schema files and entry globs in the manifest are resolved relative to the manifest's
-        // own parent directory. This lets a build (e.g. examples/maven/01-flag/pom.xml) point at
-        // a manifest in a sibling folder (../../01-flag/valkeyry-config.yaml) and still pick up
-        // the data/ and schemas/ that live next to that YAML.
         Path manifestDir = ctx.manifestPath().toAbsolutePath().getParent();
         if (manifestDir == null) manifestDir = ctx.projectBaseDir();
 
-        int submitted = 0, inserted = 0, duplicates = 0;
+        int submitted = 0, inserted = 0, duplicates = 0, failed = 0;
         List<String> declared = new ArrayList<>();
+        List<BatchEntryError> allFailures = new ArrayList<>();
 
         for (PluginManifest.TableSpec table : manifest.getTables()) {
             ctx.log().info("· " + table.getName() + ": declaring schema…");
-            JsonNode schema = table.hasInlineSchema()
-                    ? MAPPER.valueToTree(table.getSchemaInline())
-                    : MAPPER.readTree(manifestDir.resolve(table.getSchema()).toFile());
-            ValkeyryConfigClient.DeclareResult decl = client.declareTable(manifest.getTenant(), table.getName(), schema);
+            JsonNode schema;
+            try {
+                schema = table.hasInlineSchema()
+                        ? MAPPER.valueToTree(table.getSchemaInline())
+                        : MAPPER.readTree(manifestDir.resolve(table.getSchema()).toFile());
+            } catch (IOException ioe) {
+                throw new IOException("Failed to read schema for table '" + table.getName()
+                        + "' from '" + (table.hasInlineSchema() ? "<inline>" : table.getSchema())
+                        + "': " + ioe.getMessage(), ioe);
+            }
+            ValkeyryConfigClient.DeclareResult decl;
+            try {
+                decl = client.declareTable(manifest.getTenant(), table.getName(), schema);
+            } catch (ValkeyryConfigApiException ae) {
+                ctx.log().error("  ✗ " + table.getName() + ": declare-schema failed — " + ae.getMessage(), ae);
+                throw ae;
+            }
             ctx.log().info("  → registered id=" + decl.id() + " configVersion=" + decl.configVersion());
             declared.add(table.getName());
 
@@ -68,9 +88,18 @@ public final class PluginEngine {
                 ctx.log().warn("  no entry files matched " + table.getEntries());
                 continue;
             }
+
             List<ValkeyryConfigClient.EntryRequest> requests = new ArrayList<>();
             for (Path entryFile : entryFiles) {
-                JsonNode raw = MAPPER.readTree(entryFile.toFile());
+                JsonNode raw;
+                try {
+                    raw = MAPPER.readTree(entryFile.toFile());
+                } catch (IOException ioe) {
+                    // Parser errors come from Jackson with line / column info — keep that
+                    // verbatim so the user can navigate straight to it.
+                    throw new IOException("Failed to parse entry JSON '" + entryFile + "': "
+                            + ioe.getMessage(), ioe);
+                }
                 // Two supported entry shapes:
                 //   (a) Envelope: { "recordKey": "...", "data": { ...payload... } }  ← preferred,
                 //                                                                       used by all examples.
@@ -86,16 +115,50 @@ public final class PluginEngine {
                 }
                 // Fingerprint is computed but not sent — the server will recompute identically.
                 // Local computation surfaces obvious bugs (e.g. mis-encoded files) before the wire trip.
-                PayloadFingerprint.sha256(payload);
-                requests.add(new ValkeyryConfigClient.EntryRequest(recordKey, payload));
+                try {
+                    PayloadFingerprint.sha256(payload);
+                } catch (RuntimeException rex) {
+                    throw new IOException("Failed to canonicalise entry JSON '" + entryFile
+                            + "' (recordKey=" + recordKey + "): " + rex.getMessage(), rex);
+                }
+                requests.add(new ValkeyryConfigClient.EntryRequest(recordKey, payload, entryFile.toString()));
             }
-            ValkeyryConfigClient.BatchResult res = client.ingestBatch(manifest.getTenant(), table.getName(), requests);
-            ctx.log().info("  → submitted=" + res.submitted() + " inserted=" + res.inserted() + " duplicates=" + res.duplicates());
+
+            ValkeyryConfigClient.BatchResult res;
+            try {
+                res = client.ingestBatch(manifest.getTenant(), table.getName(), requests);
+            } catch (ValkeyryConfigApiException ae) {
+                // 422 + the server's structured per-row error list. Print one line per
+                // failing file BEFORE re-throwing so the user sees the report even if
+                // their build harness swallows the exception's toString().
+                ctx.log().error("  ✗ " + table.getName() + ": every row failed validation", ae);
+                for (BatchEntryError e : ae.failures()) {
+                    ctx.log().error("    " + e.formatOneLine(), null);
+                }
+                throw ae;
+            }
+
+            ctx.log().info("  → submitted=" + res.submitted()
+                    + " inserted=" + res.inserted()
+                    + " duplicates=" + res.duplicates()
+                    + " failed=" + res.failed());
+            for (BatchEntryError e : res.failures()) {
+                ctx.log().error("    ✗ " + e.formatOneLine(), null);
+            }
             submitted += res.submitted();
             inserted += res.inserted();
             duplicates += res.duplicates();
+            failed += res.failed();
+            allFailures.addAll(res.failures());
         }
-        return new PluginResult(submitted, inserted, duplicates, declared);
+
+        // Final summary — easy to spot at the bottom of a long Maven / Gradle log.
+        if (failed > 0) {
+            ctx.log().warn("=== valkeyry-config push: " + failed + " row(s) FAILED across "
+                    + declared.size() + " table(s) ===");
+            ctx.log().warn("    Fix the files listed above and re-run the build.");
+        }
+        return new PluginResult(submitted, inserted, duplicates, failed, declared, allFailures);
     }
 
     private static String readRecordKey(JsonNode payload, Path file) {
@@ -122,12 +185,6 @@ public final class PluginEngine {
     private static List<Path> expandGlob(Path baseDir, String pattern) throws IOException {
         if (pattern == null || pattern.isBlank()) return List.of();
         Path absoluteBase = baseDir.toAbsolutePath();
-        // Pattern is *relative* to the base dir and uses '/' as the separator (manifest is YAML,
-        // authored once and consumed on any OS). Do NOT build a Path from the raw pattern —
-        // '*' and '?' are illegal NTFS characters on Windows and Paths.get throws
-        // InvalidPathException before we ever reach the matcher (issue surfaces only on Windows
-        // because POSIX paths happen to accept '*'). Split the literal directory portion from
-        // the filename glob portion as plain strings instead.
         String normalised = pattern.replace('\\', '/');
         int lastSlash = normalised.lastIndexOf('/');
         String dirPart = lastSlash < 0 ? "" : normalised.substring(0, lastSlash);

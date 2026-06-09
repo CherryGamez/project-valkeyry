@@ -1298,8 +1298,20 @@ function showInlineError(slotId, body) {
     const el = document.getElementById(slotId);
     if (!el) return;
     const msg = (body && (body.detail || body.title)) || 'Unknown error';
+    const violations = (body && Array.isArray(body.violations)) ? body.violations : [];
+    // Render violations as a bulleted list below the main message — used by both single
+    // schema-failure (422 with `violations[]`) and batch partial-failure (where each
+    // failing row is pushed in as a synthetic line by the caller).
+    const violationsHtml = violations.length > 0
+        ? `<ul class="mt-2 ml-5 list-disc text-[12px] font-mono whitespace-pre-wrap">${
+              violations.map(v => `<li>${escapeHtml(String(v))}</li>`).join('')
+          }</ul>`
+        : '';
+    const traceId = body && body.traceId
+        ? `<div class="mt-1 text-[11px] opacity-70">server log: grep traceId=${escapeHtml(body.traceId)}</div>`
+        : '';
     el.innerHTML = `<div class="rounded-card p-4 text-[13px] font-medium" data-testid="${slotId}-message"
-                         style="background:rgba(255,59,48,0.06); border:1px solid rgba(255,59,48,0.22); color:#C0271E;">${escapeHtml(msg)}</div>`;
+                         style="background:rgba(255,59,48,0.06); border:1px solid rgba(255,59,48,0.22); color:#C0271E;">${escapeHtml(msg)}${violationsHtml}${traceId}</div>`;
     el.classList.remove('hidden');
 }
 function escapeHtml(s) {
@@ -3432,11 +3444,31 @@ async function ingestBatch(name) {
 
     if (res.ok) {
         document.getElementById('entry-error').classList.add('hidden');
-        // Backend response shape: { total, inserted, duplicates, views: [...] }
-        const summary = (respJson && typeof respJson === 'object' && 'inserted' in respJson)
-            ? `Batch accepted — ${respJson.inserted} inserted, ${respJson.duplicates || 0} duplicate(s)`
-            : 'Batch accepted';
+        // Server returns the same body shape on 201 (all OK) and 207 (partial failure).
+        // Surface the per-row breakdown so a partial-failure isn't silently swept under
+        // "Batch accepted".
+        const inserted   = (respJson && respJson.inserted)   || 0;
+        const duplicates = (respJson && respJson.duplicates) || 0;
+        const failed     = (respJson && respJson.failed)     || 0;
+        let summary = `Batch accepted — ${inserted} inserted, ${duplicates} duplicate(s)`;
+        if (failed > 0) summary += `, ${failed} failed`;
         toast(summary);
+        if (failed > 0 && Array.isArray(respJson.errors) && respJson.errors.length > 0) {
+            // Re-use the inline-error panel — it already knows how to render `violations`.
+            const lines = respJson.errors.map(err => {
+                const idx = (err.index ?? -1) + 1;
+                const rk = err.recordKey ? ` recordKey=${err.recordKey}` : '';
+                const violations = Array.isArray(err.violations) ? err.violations : [];
+                return {
+                    detail: `Row ${idx}${rk} — ${err.errorType || 'failed'}: ${err.message || ''}`,
+                    violations
+                };
+            });
+            showInlineError('entry-error', {
+                detail: `${failed} row(s) failed (out of ${respJson.submitted || arr.length}):`,
+                violations: lines.flatMap(l => [l.detail, ...l.violations.map(v => '    • ' + v)])
+            });
+        }
         loadEntries(name);
     } else {
         showInlineError('entry-error', respJson || { detail: 'Batch failed: ' + res.status });

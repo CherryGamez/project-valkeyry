@@ -61,12 +61,29 @@ public class PushMojo extends AbstractMojo {
         PluginContext ctx = new PluginContext(manifestPath, baseDir, log);
         try {
             PluginResult res = PluginEngine.run(ctx);
-            log.info(String.format("valkeyry-config push complete — submitted=%d inserted=%d duplicates=%d",
-                    res.submitted(), res.inserted(), res.duplicates()));
+            log.info(String.format("valkeyry-config push complete — submitted=%d inserted=%d duplicates=%d failed=%d",
+                    res.submitted(), res.inserted(), res.duplicates(), res.failed()));
+            if (res.hasFailures()) {
+                // Per-row error detail was already logged inside PluginEngine.run — here we
+                // just trip the build with a concise top-level summary so the user can grep
+                // for it in the Maven output.
+                StringBuilder sb = new StringBuilder();
+                sb.append("valkeyry-config push: ").append(res.failed())
+                  .append(" row(s) failed validation. Fix the files reported above and re-run.");
+                throw new MojoFailureException(sb.toString());
+            }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             throw new MojoExecutionException("Interrupted", ie);
+        } catch (MojoFailureException me) {
+            throw me;
+        } catch (io.valkeyry.plugin.core.http.ValkeyryConfigApiException ae) {
+            // The exception's message already lists every failing row with its source file.
+            // Surface it on the Maven log AND fail the build.
+            log.error("valkeyry-config push failed", ae);
+            throw new MojoFailureException("valkeyry-config push failed: " + ae.getMessage(), ae);
         } catch (Exception ex) {
+            log.error("valkeyry-config push failed", ex);
             throw new MojoFailureException("valkeyry-config push failed: " + ex.getMessage(), ex);
         }
     }

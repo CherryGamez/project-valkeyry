@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Logback configuration for valkeyry-config.
+
+    Goal: when a developer reads the log line for a failed bulk-import row, they can navigate
+    directly to the source code that threw. The pattern below shows:
+      • timestamp + level
+      • thread
+      • MDC keys we propagate from the controller (requestId, traceId, tenantId, tableName,
+        recordKey, rowIndex) — empty when not set
+      • full logger class name + method + (File.java:line)
+      • the message itself
+
+    Example output of a single bulk-ingest schema violation:
+
+      2025-07-12 14:32:11.482 WARN  [reactor-http-nio-3]
+        [req=a4f1 trace= tenant=demo table=customers row=12 recordKey=ABC-1012]
+        i.v.config.api.VirtualTableController.lambda$ingestOne$5(VirtualTableController.java:178)
+        - Bulk ingest row[12] schema-violation (tenant=demo table=customers recordKey=ABC-1012): [...]
+
+    `%file:%line` is reflective and slightly costly (a few %) — fine for an iPaaS control plane
+    where throughput is dominated by network I/O, not logging. If a real prod deployment ever
+    needs to disable it, set the LOG_LINENUM env var to "false" to drop file:line from the
+    pattern via the substitution below.
+-->
+<configuration>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="valkeyry-config"/>
+
+    <!-- Toggle: set LOG_LINENUM=false at runtime to skip the (File:line) suffix in production. -->
+    <property name="LOG_LINENUM" value="${LOG_LINENUM:-true}"/>
+
+    <!-- Pattern w/ source location (default for dev / staging). -->
+    <property name="PATTERN_WITH_LOC"
+              value="%date{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] [req=%X{requestId:-} trace=%X{traceId:-} tenant=%X{tenantId:-} table=%X{tableName:-} row=%X{rowIndex:-} recordKey=%X{recordKey:-}] %logger{36}.%method(%file:%line) - %msg%n%rEx{full}"/>
+
+    <!-- Same minus file:line for hot paths. -->
+    <property name="PATTERN_NO_LOC"
+              value="%date{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] [req=%X{requestId:-} trace=%X{traceId:-} tenant=%X{tenantId:-} table=%X{tableName:-} row=%X{rowIndex:-} recordKey=%X{recordKey:-}] %logger{36} - %msg%n%rEx{full}"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${PATTERN_WITH_LOC}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Pull every io.valkeyry log line through STDOUT at DEBUG (application.yml drives the level). -->
+    <logger name="io.valkeyry" level="DEBUG" additivity="false">
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
+    <!-- Reduce noise from R2DBC + Reactor at root so the meaningful log lines don't drown. -->
+    <logger name="reactor.netty.http.server" level="INFO"/>
+    <logger name="io.r2dbc.postgresql.PARAM" level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+</configuration>

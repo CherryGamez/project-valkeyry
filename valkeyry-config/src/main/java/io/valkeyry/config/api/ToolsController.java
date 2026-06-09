@@ -35,6 +35,8 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 import java.io.ByteArrayInputStream;
@@ -70,6 +72,8 @@ import java.util.Map;
 @RequestMapping("/api/v1/tools")
 @Tag(name = "Tools", description = "File → JSON converters (XLSX, CSV, DMN) for table imports.")
 public class ToolsController {
+
+    private static final Logger log = LoggerFactory.getLogger(ToolsController.class);
 
     private final ObjectMapper mapper;
 
@@ -113,10 +117,13 @@ public class ToolsController {
         root.put("fileName", filename);
         ArrayNode tables = root.putArray("tables");
         DataFormatter formatter = new DataFormatter();
+        String currentSheet = null;
+        int currentRowNumber = -1;
         try (InputStream in = new ByteArrayInputStream(bytes);
              Workbook wb = new XSSFWorkbook(in)) {
             for (int s = 0; s < wb.getNumberOfSheets(); s++) {
                 Sheet sheet = wb.getSheetAt(s);
+                currentSheet = sheet.getSheetName();
                 if (sheet.getPhysicalNumberOfRows() == 0) continue;
                 ObjectNode table = tables.addObject();
                 table.put("tableName", sheet.getSheetName());
@@ -134,6 +141,7 @@ public class ToolsController {
                 }
                 ArrayNode rows = table.putArray("rows");
                 for (int r = sheet.getFirstRowNum() + 1; r <= sheet.getLastRowNum(); r++) {
+                    currentRowNumber = r + 1;       // 1-based for the user
                     Row row = sheet.getRow(r);
                     if (row == null) continue;
                     ObjectNode rowJson = rows.addObject();
@@ -141,31 +149,55 @@ public class ToolsController {
                     for (int c = 0; c < columns.size(); c++) {
                         Cell cell = row.getCell(c, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
                         if (cell == null) { rowJson.putNull(columns.get(c)); continue; }
-                        switch (cell.getCellType()) {
-                            case NUMERIC -> {
-                                double d = cell.getNumericCellValue();
-                                if (d == Math.floor(d) && !Double.isInfinite(d)) {
-                                    rowJson.put(columns.get(c), (long) d);
-                                } else {
-                                    rowJson.put(columns.get(c), d);
+                        try {
+                            switch (cell.getCellType()) {
+                                case NUMERIC -> {
+                                    double d = cell.getNumericCellValue();
+                                    if (d == Math.floor(d) && !Double.isInfinite(d)) {
+                                        rowJson.put(columns.get(c), (long) d);
+                                    } else {
+                                        rowJson.put(columns.get(c), d);
+                                    }
+                                    nonEmpty = true;
                                 }
-                                nonEmpty = true;
+                                case BOOLEAN -> { rowJson.put(columns.get(c), cell.getBooleanCellValue()); nonEmpty = true; }
+                                case BLANK   -> rowJson.putNull(columns.get(c));
+                                default -> {
+                                    String v = formatter.formatCellValue(cell);
+                                    rowJson.put(columns.get(c), v);
+                                    if (!v.isEmpty()) nonEmpty = true;
+                                }
                             }
-                            case BOOLEAN -> { rowJson.put(columns.get(c), cell.getBooleanCellValue()); nonEmpty = true; }
-                            case BLANK   -> rowJson.putNull(columns.get(c));
-                            default -> {
-                                String v = formatter.formatCellValue(cell);
-                                rowJson.put(columns.get(c), v);
-                                if (!v.isEmpty()) nonEmpty = true;
-                            }
+                        } catch (RuntimeException cellEx) {
+                            // Surface cell-level errors with the exact cell reference (sheet!A1)
+                            String addr = cell.getAddress().formatAsString();
+                            log.warn("XLSX parse error at {}!{} (column='{}'): {}",
+                                    sheet.getSheetName(), addr, columns.get(c), cellEx.getMessage());
+                            throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                                    "Failed to parse XLSX cell " + sheet.getSheetName() + "!" + addr
+                                            + " (column '" + columns.get(c) + "'): " + cellEx.getMessage(),
+                                    cellEx);
                         }
                     }
                     if (!nonEmpty) rows.remove(rows.size() - 1);
                 }
+                currentRowNumber = -1;
             }
         } catch (IOException e) {
+            log.warn("Failed to read XLSX '{}': {}", filename, e.getMessage());
             throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
-                    "Failed to parse XLSX: " + e.getMessage(), e);
+                    "Failed to read XLSX '" + filename + "': " + e.getMessage(), e);
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            String loc = currentSheet != null
+                    ? " (last sheet='" + currentSheet
+                        + (currentRowNumber > 0 ? "', row=" + currentRowNumber : "'")
+                        + ")"
+                    : "";
+            log.warn("XLSX parse error in '{}' {}: {}", filename, loc, e.getMessage(), e);
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Failed to parse XLSX '" + filename + "'" + loc + ": " + e.getMessage(), e);
         }
         return root;
     }
@@ -182,6 +214,7 @@ public class ToolsController {
         ArrayNode cols = table.putArray("columns");
         ArrayNode rows = table.putArray("rows");
 
+        int rowNumber = 1;          // header is line 1
         try (CSVReader reader = new CSVReader(new InputStreamReader(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8))) {
             String[] header = reader.readNext();
             if (header == null) return root;
@@ -194,6 +227,7 @@ public class ToolsController {
             }
             String[] line;
             while ((line = reader.readNext()) != null) {
+                rowNumber++;
                 ObjectNode row = rows.addObject();
                 for (int i = 0; i < columns.size(); i++) {
                     String v = i < line.length ? line[i] : null;
@@ -201,9 +235,16 @@ public class ToolsController {
                     else row.put(columns.get(i), v);
                 }
             }
-        } catch (IOException | CsvValidationException e) {
+        } catch (CsvValidationException e) {
+            log.warn("CSV validation error in '{}' at line {}: {}", filename, rowNumber, e.getMessage());
             throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
-                    "Failed to parse CSV: " + e.getMessage(), e);
+                    "Failed to parse CSV '" + filename + "' at line " + rowNumber
+                            + " (a quoted field is malformed or the line has an unexpected number of columns): "
+                            + e.getMessage(), e);
+        } catch (IOException e) {
+            log.warn("Failed to read CSV '{}' at line {}: {}", filename, rowNumber, e.getMessage());
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Failed to read CSV '" + filename + "' at line " + rowNumber + ": " + e.getMessage(), e);
         }
         return root;
     }
