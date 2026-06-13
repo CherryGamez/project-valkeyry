@@ -6,6 +6,7 @@ import DlqPanel from "@/components/admin/DlqPanel";
 import TopologyBuilder from "@/components/admin/TopologyBuilder";
 import MultiPublishPanel from "@/components/admin/MultiPublishPanel";
 import CopilotPanel from "@/components/admin/CopilotPanel";
+import DocsPanel from "@/components/admin/DocsPanel";
 import { getContext } from "@/lib/ipaasClient";
 
 export default function AdminConsole({ session, onSignOut }) {
@@ -44,6 +45,8 @@ export default function AdminConsole({ session, onSignOut }) {
               className="data-[state=active]:bg-[var(--accent-cyan)] data-[state=active]:text-[#0F172A]">Multi-Tenant Publish</TabsTrigger>
             <TabsTrigger value="copilot"       data-testid="tab-copilot"
               className="data-[state=active]:bg-[var(--accent-cyan)] data-[state=active]:text-[#0F172A]">Operator Copilot</TabsTrigger>
+            <TabsTrigger value="docs"          data-testid="tab-docs"
+              className="data-[state=active]:bg-[var(--accent-cyan)] data-[state=active]:text-[#0F172A]">Docs</TabsTrigger>
           </TabsList>
 
           <div className="mt-6">
@@ -52,6 +55,7 @@ export default function AdminConsole({ session, onSignOut }) {
             <TabsContent value="topologies"    data-testid="panel-topologies"><TopologyBuilder ctx={ctx} /></TabsContent>
             <TabsContent value="multi-publish" data-testid="panel-multi-publish"><MultiPublishPanel /></TabsContent>
             <TabsContent value="copilot"       data-testid="panel-copilot"><CopilotPanel ctx={ctx} /></TabsContent>
+            <TabsContent value="docs"          data-testid="panel-docs"><DocsPanel /></TabsContent>
           </div>
         </Tabs>
 

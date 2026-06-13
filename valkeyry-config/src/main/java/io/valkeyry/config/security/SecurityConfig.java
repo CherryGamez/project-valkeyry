@@ -85,6 +85,7 @@ public class SecurityConfig {
                         "/login", "/login.html",
                         "/admin", "/admin.html",
                         "/tools", "/tools.html",
+                        "/docs", "/docs/**",
                         "/assets/**", "/static/**").permitAll()
                 // OpenAPI / Swagger UI — public so devs can browse the contract without a token.
                 .pathMatchers(HttpMethod.GET,

@@ -116,9 +116,7 @@ code, pre, .mono {
 @layer base {
     [data-debug-wrapper="true"] {
         display: contents !important;
-    }
-
-    [data-debug-wrapper="true"] > * {
+    }    [data-debug-wrapper="true"] > * {
         margin-left: inherit;
         margin-right: inherit;
         margin-top: inherit;
@@ -144,3 +142,48 @@ code, pre, .mono {
         border-bottom-color: inherit;
     }
 }
+
+/* ─── Docs prose (dark theme) ─────────────────────────────────────── */
+.docs-prose { color: #E2E8F0; line-height: 1.65; font-size: 14.5px; }
+.docs-prose h1, .docs-prose h2, .docs-prose h3, .docs-prose h4 {
+    font-weight: 600; letter-spacing: -0.012em; color: #F1F5F9;
+    margin-top: 1.6em; margin-bottom: 0.6em;
+}
+.docs-prose h1 { font-size: 28px; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.4em; margin-top: 0; color: #FFFFFF; }
+.docs-prose h2 { font-size: 22px; }
+.docs-prose h3 { font-size: 17px; color: #CBD5E1; }
+.docs-prose h4 { font-size: 14px; color: #94A3B8; text-transform: none; }
+.docs-prose p  { margin: 0.7em 0; }
+.docs-prose strong { color: #F1F5F9; font-weight: 600; }
+.docs-prose ul, .docs-prose ol { margin: 0.5em 0 0.8em 1.3em; }
+.docs-prose li { margin: 0.25em 0; }
+.docs-prose a  { color: hsl(var(--primary)); text-decoration: none; }
+.docs-prose a:hover { text-decoration: underline; }
+.docs-prose hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 2em 0; }
+.docs-prose blockquote {
+    border-left: 3px solid hsl(var(--indigo));
+    background: rgba(99,102,241,0.10);
+    padding: 0.6em 1em; margin: 1em 0; border-radius: 8px; color: #CBD5E1;
+}
+.docs-prose code {
+    font-family: "JetBrains Mono","SF Mono",ui-monospace,Menlo,monospace;
+    font-size: 12.5px; background: rgba(148,163,184,0.15); padding: 1px 6px; border-radius: 6px; color: #E2E8F0;
+}
+.docs-prose pre {
+    background: #0B1220; color: #E2E8F0;
+    padding: 16px 18px; border-radius: 12px; overflow-x: auto;
+    font-family: "JetBrains Mono","SF Mono",ui-monospace,Menlo,monospace;
+    font-size: 12.5px; line-height: 1.55; margin: 1em 0;
+    border: 1px solid hsl(var(--border));
+}
+.docs-prose pre code { background: transparent; padding: 0; color: inherit; border-radius: 0; font-size: 12.5px; }
+.docs-prose table {
+    width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 13px;
+    border: 1px solid hsl(var(--border)); border-radius: 10px; overflow: hidden;
+}
+.docs-prose th, .docs-prose td {
+    padding: 8px 12px; border-bottom: 1px solid hsl(var(--border));
+    text-align: left; vertical-align: top;
+}
+.docs-prose th { background: rgba(148,163,184,0.08); font-weight: 600; color: #F1F5F9; }
+.docs-prose tr:last-child td { border-bottom: 0; }

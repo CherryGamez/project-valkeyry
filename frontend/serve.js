@@ -44,6 +44,7 @@ const MIME = {
     '.svg':'image/svg+xml',
     '.png':'image/png',
     '.ico':'image/x-icon',
+    '.md':'text/markdown; charset=utf-8',
     '.map':'application/json'
 };
 
